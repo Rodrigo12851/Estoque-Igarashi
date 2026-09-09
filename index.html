@@ -781,11 +781,12 @@
             <label>Variedade</label>
             <select id="variedadeSaida"><option value="">Selecione o produto primeiro</option></select>
             <label>Local de Armazenamento</label>
-            <select id="localSaida"><option value="">Selecione o produto primeiro</option></select>
+            <select id="localSaida" onchange="atualizarExibicaoSaldoSaida()"><option value="">Selecione o produto primeiro</option></select>
             <label>Tipo de Embalagem</label>
-            <select id="embalagemSaida"><option value="">Selecione o produto primeiro</option></select>
+            <select id="embalagemSaida" onchange="atualizarExibicaoSaldoSaida()"><option value="">Selecione o produto primeiro</option></select>
+            <div id="infoSaldoDisponivelSaida" style="display: none;"></div>
             <label>Quantidade (unidades)</label>
-            <input type="number" id="qtdSaida" min="1" placeholder="Ex: 50">
+            <input type="number" id="qtdSaida" min="1" placeholder="Ex: 50" oninput="atualizarExibicaoSaldoSaida()">
             <div class="grupo-botoes">
                 <button class="btn btn-salvar" onclick="salvarSaida()">✅ Lançar Saída</button>
                 <button class="btn btn-cancelar" id="btnCancelarSaida" onclick="cancelarEdicao('saida')">❌ Cancelar</button>
@@ -1145,27 +1146,52 @@ function migrarEHarmonizarProdutos() {
         });
     }
 
-    // 3. Harmoniza glebaId e variedadeId das saídas para que dêem baixa correta nas entradas do mesmo lote/controle
+    // 3. Harmoniza produtoId, localId, glebaId e variedadeId das saídas para que dêem baixa correta nas entradas do mesmo lote/controle
     if (cadastros.saida && cadastros.saida.length > 0 && cadastros.entrada && cadastros.entrada.length > 0) {
         cadastros.saida.forEach(s => {
-            let entMesmoControle = cadastros.entrada.find(e => e.controleId === s.controleId && e.produtoId === s.produtoId) 
-                               || cadastros.entrada.find(e => e.controleId === s.controleId);
+            let entMesmoControle = cadastros.entrada.find(e => e.controleId === s.controleId && e.produtoId === s.produtoId);
+            
+            if (!entMesmoControle) {
+                let prodSaida = cadastros.produto.find(p => p.id === s.produtoId);
+                let nomeProdSaida = prodSaida ? normalizarTexto(limparNomeProduto(prodSaida.nome)) : '';
+                let codProdSaida = prodSaida ? String(prodSaida.cod || prodSaida.codigo || '').toLowerCase() : '';
+                entMesmoControle = cadastros.entrada.find(e => {
+                    if (e.controleId !== s.controleId) return false;
+                    let prodEnt = cadastros.produto.find(p => p.id === e.produtoId);
+                    if (!prodEnt) return false;
+                    let nomeProdEnt = normalizarTexto(limparNomeProduto(prodEnt.nome));
+                    let codProdEnt = String(prodEnt.cod || prodEnt.codigo || '').toLowerCase();
+                    return (codProdSaida && codProdEnt && codProdSaida === codProdEnt) || 
+                           (nomeProdSaida && nomeProdEnt && (nomeProdSaida === nomeProdEnt || nomeProdSaida.includes(nomeProdEnt) || nomeProdEnt.includes(nomeProdSaida)));
+                });
+                if (entMesmoControle) {
+                    s.produtoId = entMesmoControle.produtoId;
+                    alterou = true;
+                }
+            }
+
+            if (!entMesmoControle) {
+                entMesmoControle = cadastros.entrada.find(e => e.controleId === s.controleId);
+            }
+
             if (entMesmoControle) {
                 let glebaAtual = cadastros.gleba.find(g => g.id === s.glebaId);
                 let nomeGlebaAtual = glebaAtual ? normalizarTexto(glebaAtual.nome) : '';
-                if (!s.glebaId || nomeGlebaAtual === '1' || nomeGlebaAtual === 'gleba 1' || nomeGlebaAtual === '') {
+                if (!s.glebaId || nomeGlebaAtual === '1' || nomeGlebaAtual === 'gleba 1' || nomeGlebaAtual === '' || (entMesmoControle.glebaId && s.glebaId !== entMesmoControle.glebaId)) {
                     s.glebaId = entMesmoControle.glebaId;
                     alterou = true;
                 }
                 
                 let varAtual = cadastros.variedade.find(v => v.id === s.variedadeId);
                 let nomeVarAtual = varAtual ? normalizarTexto(varAtual.nome) : '';
-                if (!s.variedadeId || nomeVarAtual === 'padrao' || nomeVarAtual === '') {
+                if (!s.variedadeId || nomeVarAtual === 'padrao' || nomeVarAtual === '' || (entMesmoControle.variedadeId && s.variedadeId !== entMesmoControle.variedadeId)) {
                     s.variedadeId = entMesmoControle.variedadeId;
                     alterou = true;
                 }
 
-                if (!s.localId && entMesmoControle.localId) {
+                let locAtual = cadastros.local.find(l => l.id === s.localId);
+                let nomeLocAtual = locAtual ? normalizarTexto(locAtual.nome) : '';
+                if (!s.localId || nomeLocAtual === 'armazem geral' || nomeLocAtual === 'geral' || nomeLocAtual === '' || (entMesmoControle.localId && s.localId !== entMesmoControle.localId)) {
                     s.localId = entMesmoControle.localId;
                     alterou = true;
                 }
@@ -1249,18 +1275,26 @@ function obterSaldosAtuais() {
     cadastros.saida.forEach(sai => {
         let chave = `${sai.localId || 0}_${sai.produtoId || 0}_${sai.controleId}`;
         if (!saldos[chave]) {
-            saldos[chave] = { 
-                localId: sai.localId, 
-                produtoId: sai.produtoId, 
-                controleId: sai.controleId, 
-                glebaId: sai.glebaId, 
-                variedadeId: sai.variedadeId,
-                glebasSet: new Set(),
-                variedadesSet: new Set(),
-                caixas: 0, 
-                contentores: 0, 
-                sacos: 0 
-            };
+            let chaveCompativel = Object.keys(saldos).find(k => {
+                let s = saldos[k];
+                return s.controleId === sai.controleId && s.produtoId === sai.produtoId;
+            });
+            if (chaveCompativel) {
+                chave = chaveCompativel;
+            } else {
+                saldos[chave] = { 
+                    localId: sai.localId, 
+                    produtoId: sai.produtoId, 
+                    controleId: sai.controleId, 
+                    glebaId: sai.glebaId, 
+                    variedadeId: sai.variedadeId,
+                    glebasSet: new Set(),
+                    variedadesSet: new Set(),
+                    caixas: 0, 
+                    contentores: 0, 
+                    sacos: 0 
+                };
+            }
         }
         if (sai.glebaId) saldos[chave].glebasSet.add(sai.glebaId);
         if (sai.variedadeId) saldos[chave].variedadesSet.add(sai.variedadeId);
@@ -1269,6 +1303,35 @@ function obterSaldosAtuais() {
         else if (sai.embalagem === 'Saco') saldos[chave].sacos -= parseInt(sai.qtd || 0);
     });
     return saldos;
+}
+
+function calcularBaixasEntradas() {
+    let totalSaidasPorLote = {};
+    (cadastros.saida || []).forEach(s => {
+        let chave = `${s.controleId}_${s.produtoId}_${s.embalagem || 'Saco'}`;
+        totalSaidasPorLote[chave] = (totalSaidasPorLote[chave] || 0) + parseInt(s.qtd || 0);
+    });
+
+    let saidasRestantes = { ...totalSaidasPorLote };
+    let mapaEntradas = {};
+    let entradasOrdenadas = [...(cadastros.entrada || [])].sort((a, b) => (a.data || '').localeCompare(b.data || '') || (a.id - b.id));
+
+    entradasOrdenadas.forEach(e => {
+        let chave = `${e.controleId}_${e.produtoId}_${e.embalagem || 'Saco'}`;
+        let disponivelParaAbater = saidasRestantes[chave] || 0;
+        let qtdEntrada = parseInt(e.qtd || 0);
+        let baixada = Math.min(qtdEntrada, disponivelParaAbater);
+        saidasRestantes[chave] = Math.max(0, disponivelParaAbater - baixada);
+        let saldo = Math.max(0, qtdEntrada - baixada);
+
+        mapaEntradas[e.id] = {
+            qtdOriginal: qtdEntrada,
+            qtdBaixada: baixada,
+            saldoRestante: saldo
+        };
+    });
+
+    return mapaEntradas;
 }
 
 function selecionarTipo(tipo, botao) {
@@ -1412,18 +1475,39 @@ function carregarDadosBaseControle(tipo) {
         Object.keys(saldos).forEach(k => {
             let s = saldos[k];
             if (s.controleId === id && (s.caixas > 0 || s.contentores > 0 || s.sacos > 0)) {
-                if(s.produtoId) produtosEstoque.add(s.produtoId);
-                if(s.glebaId) glebasEstoque.add(s.glebaId);
+                if (s.produtoId) produtosEstoque.add(s.produtoId);
+                if (s.glebaId) glebasEstoque.add(s.glebaId);
+                if (s.glebasSet) s.glebasSet.forEach(gId => glebasEstoque.add(gId));
             }
         });
-        campoGleba.innerHTML = `<option value="">Selecione</option>` + cadastros.gleba.filter(g => glebasIdsVinculadas.includes(g.id) && glebasEstoque.has(g.id)).map(g => `<option value="${g.id}">${g.nome}</option>`).join('');
-        campoProd.innerHTML = `<option value="">Selecione o Produto</option>` + cadastros.produto.filter(p => produtosEstoque.has(p.id)).map(p => {
+
+        let glebasOpcoes = cadastros.gleba.filter(g => glebasIdsVinculadas.includes(g.id));
+        if (glebasEstoque.size > 0) {
+            let filtradas = glebasOpcoes.filter(g => glebasEstoque.has(g.id));
+            if (filtradas.length > 0) glebasOpcoes = filtradas;
+        }
+        campoGleba.innerHTML = `<option value="">Selecione</option>` + glebasOpcoes.map(g => `<option value="${g.id}">${g.nome}</option>`).join('');
+        if (glebasOpcoes.length === 1) campoGleba.value = glebasOpcoes[0].id;
+
+        let produtosOpcoes = cadastros.produto.filter(p => produtosEstoque.has(p.id));
+        if (produtosOpcoes.length === 0) {
+            produtosOpcoes = cadastros.produto.filter(p => (cadastros.entrada || []).some(e => e.controleId === id && e.produtoId === p.id));
+        }
+        campoProd.innerHTML = `<option value="">Selecione o Produto</option>` + produtosOpcoes.map(p => {
             let codTxt = p.cod ? `${p.cod} - ` : '';
             return `<option value="${p.id}">${codTxt}${limparNomeProduto(p.nome)}</option>`;
         }).join('');
-        campoVariedade.innerHTML = '<option value="">Selecione o produto primeiro</option>';
-        campoLoc.innerHTML = '<option value="">Selecione o produto primeiro</option>';
-        document.getElementById('embalagemSaida').innerHTML = '<option value="">Selecione o produto primeiro</option>';
+
+        if (produtosOpcoes.length === 1) {
+            campoProd.value = produtosOpcoes[0].id;
+            atualizarFiltrosCruzadosSaida();
+        } else {
+            campoVariedade.innerHTML = '<option value="">Selecione o produto primeiro</option>';
+            campoLoc.innerHTML = '<option value="">Selecione o produto primeiro</option>';
+            document.getElementById('embalagemSaida').innerHTML = '<option value="">Selecione o produto primeiro</option>';
+            let infoBox = document.getElementById('infoSaldoDisponivelSaida');
+            if (infoBox) infoBox.style.display = 'none';
+        }
     } else {
         campoGleba.innerHTML = glebasIdsVinculadas.length === 0 ? '<option value="">Nenhuma gleba vinculada</option>' : `<option value="">Selecione</option>` + cadastros.gleba.filter(g => glebasIdsVinculadas.includes(g.id)).map(g => `<option value="${g.id}">${g.nome}</option>`).join('');
         campoVariedade.innerHTML = `<option value="">Selecione</option>` + cadastros.variedade.filter(v => v.culturaId === c.culturaId).map(v => `<option value="${v.id}">${v.nome}</option>`).join('');
@@ -1438,6 +1522,7 @@ function carregarDadosBaseControle(tipo) {
 function atualizarFiltrosCruzadosSaida() {
     const ctrlId = parseInt(document.getElementById('controleSaida').value);
     const prodId = parseInt(document.getElementById('produtoSaida').value);
+    const campoGleba = document.getElementById('glebaSaida');
     const campoVariedade = document.getElementById('variedadeSaida');
     const campoLocal = document.getElementById('localSaida');
     const campoEmbalagem = document.getElementById('embalagemSaida');
@@ -1446,6 +1531,8 @@ function atualizarFiltrosCruzadosSaida() {
         campoVariedade.innerHTML = '<option value="">Selecione o produto primeiro</option>';
         campoLocal.innerHTML = '<option value="">Selecione o produto primeiro</option>';
         campoEmbalagem.innerHTML = '<option value="">Selecione o produto primeiro</option>';
+        let infoBox = document.getElementById('infoSaldoDisponivelSaida');
+        if (infoBox) infoBox.style.display = 'none';
         return;
     }
 
@@ -1454,24 +1541,132 @@ function atualizarFiltrosCruzadosSaida() {
     let saldos = obterSaldosAtuais();
     let locaisComEstoque = new Set();
     let temCaixa = false, temContentor = false, temSaco = false;
+    let totalCaixas = 0, totalContentores = 0, totalSacos = 0;
+    let loteGlebaId = null, loteVariedadeId = null, loteLocalId = null;
+
+    let entDoLote = (cadastros.entrada || []).find(e => e.controleId === ctrlId && e.produtoId === prodId)
+                 || (cadastros.entrada || []).find(e => e.controleId === ctrlId);
+
+    if (entDoLote) {
+        loteGlebaId = entDoLote.glebaId;
+        loteVariedadeId = entDoLote.variedadeId;
+        loteLocalId = entDoLote.localId;
+    }
 
     Object.keys(saldos).forEach(k => {
         let s = saldos[k];
         if (s.controleId === ctrlId && s.produtoId === prodId) {
-            if (s.caixas > 0) { temCaixa = true; locaisComEstoque.add(s.localId); }
-            if (s.contentores > 0) { temContentor = true; locaisComEstoque.add(s.localId); }
-            if (s.sacos > 0) { temSaco = true; locaisComEstoque.add(s.localId); }
+            if (s.caixas > 0) { temCaixa = true; totalCaixas += s.caixas; locaisComEstoque.add(s.localId); }
+            if (s.contentores > 0) { temContentor = true; totalContentores += s.contentores; locaisComEstoque.add(s.localId); }
+            if (s.sacos > 0) { temSaco = true; totalSacos += s.sacos; locaisComEstoque.add(s.localId); }
+            if (s.glebaId) loteGlebaId = s.glebaId;
+            if (s.variedadeId) loteVariedadeId = s.variedadeId;
+            if (s.localId) loteLocalId = s.localId;
         }
     });
 
-    campoVariedade.innerHTML = culturaId ? `<option value="">Selecione</option>` + cadastros.variedade.filter(v => v.culturaId === culturaId).map(v => `<option value="${v.id}">${v.nome}</option>`).join('') : `<option value="">Selecione</option>` + cadastros.variedade.map(v => `<option value="${v.id}">${v.nome}</option>`).join('');
-    campoLocal.innerHTML = `<option value="">Selecione</option>` + cadastros.local.filter(l => locaisComEstoque.has(l.id)).map(l => `<option value="${l.id}">${l.nome}</option>`).join('');
+    if (campoGleba && loteGlebaId && (!campoGleba.value || campoGleba.value === '')) {
+        campoGleba.value = loteGlebaId;
+    }
+
+    let variedadesPossiveis = culturaId ? cadastros.variedade.filter(v => v.culturaId === culturaId) : cadastros.variedade;
+    campoVariedade.innerHTML = `<option value="">Selecione</option>` + variedadesPossiveis.map(v => `<option value="${v.id}">${v.nome}</option>`).join('');
+    if (loteVariedadeId && variedadesPossiveis.some(v => v.id === loteVariedadeId)) {
+        campoVariedade.value = loteVariedadeId;
+    } else if (variedadesPossiveis.length === 1) {
+        campoVariedade.value = variedadesPossiveis[0].id;
+    }
+
+    if (loteLocalId) locaisComEstoque.add(loteLocalId);
+    let locaisFiltrados = cadastros.local.filter(l => locaisComEstoque.has(l.id));
+    if (locaisFiltrados.length === 0) locaisFiltrados = cadastros.local;
+    campoLocal.innerHTML = `<option value="">Selecione</option>` + locaisFiltrados.map(l => `<option value="${l.id}">${limparNomeGalpao(l.nome)}</option>`).join('');
+    if (loteLocalId && locaisFiltrados.some(l => l.id === loteLocalId)) {
+        campoLocal.value = loteLocalId;
+    } else if (locaisFiltrados.length === 1) {
+        campoLocal.value = locaisFiltrados[0].id;
+    }
 
     let optEmbalagem = '<option value="">Selecione</option>';
-    if (temCaixa) optEmbalagem += '<option value="Caixa">Caixa</option>';
-    if (temContentor) optEmbalagem += '<option value="Contentor">Contentor</option>';
-    if (temSaco) optEmbalagem += '<option value="Saco">Saco</option>';
+    let embalagensDisponiveis = [];
+    if (temCaixa || totalCaixas > 0) { optEmbalagem += '<option value="Caixa">Caixa</option>'; embalagensDisponiveis.push('Caixa'); }
+    if (temContentor || totalContentores > 0) { optEmbalagem += '<option value="Contentor">Contentor</option>'; embalagensDisponiveis.push('Contentor'); }
+    if (temSaco || totalSacos > 0 || embalagensDisponiveis.length === 0) { optEmbalagem += '<option value="Saco">Saco</option>'; embalagensDisponiveis.push('Saco'); }
     campoEmbalagem.innerHTML = optEmbalagem;
+
+    if (embalagensDisponiveis.length === 1) {
+        campoEmbalagem.value = embalagensDisponiveis[0];
+    } else if (entDoLote && embalagensDisponiveis.includes(entDoLote.embalagem)) {
+        campoEmbalagem.value = entDoLote.embalagem;
+    } else if (temSaco) {
+        campoEmbalagem.value = 'Saco';
+    }
+
+    atualizarExibicaoSaldoSaida();
+}
+
+function atualizarExibicaoSaldoSaida() {
+    const ctrlId = parseInt(document.getElementById('controleSaida')?.value);
+    const prodId = parseInt(document.getElementById('produtoSaida')?.value);
+    const embalagem = document.getElementById('embalagemSaida')?.value;
+    const localId = parseInt(document.getElementById('localSaida')?.value) || 0;
+    const campoQtd = document.getElementById('qtdSaida');
+    let infoBox = document.getElementById('infoSaldoDisponivelSaida');
+
+    if (!infoBox) {
+        infoBox = document.createElement('div');
+        infoBox.id = 'infoSaldoDisponivelSaida';
+        if (campoQtd && campoQtd.parentNode) {
+            campoQtd.parentNode.insertBefore(infoBox, campoQtd);
+        }
+    }
+
+    if (!ctrlId || !prodId || !embalagem) {
+        if (infoBox) infoBox.style.display = 'none';
+        return;
+    }
+
+    let saldos = obterSaldosAtuais();
+    let apiKey = `${localId}_${prodId}_${ctrlId}`;
+    let itemSaldo = saldos[apiKey];
+    if (!itemSaldo) {
+        let compKey = Object.keys(saldos).find(k => saldos[k].controleId === ctrlId && saldos[k].produtoId === prodId);
+        if (compKey) itemSaldo = saldos[compKey];
+    }
+
+    let saldoDisp = 0;
+    if (itemSaldo) {
+        if (embalagem === 'Caixa') saldoDisp = itemSaldo.caixas;
+        else if (embalagem === 'Contentor') saldoDisp = itemSaldo.contentores;
+        else saldoDisp = itemSaldo.sacos;
+    }
+
+    let qtdDigitada = parseInt(campoQtd?.value) || 0;
+    let saldoApos = Math.max(0, saldoDisp - qtdDigitada);
+
+    infoBox.style.display = 'block';
+    infoBox.style.margin = '8px 0 10px 0';
+    infoBox.style.padding = '10px 14px';
+    infoBox.style.borderRadius = '6px';
+    infoBox.style.fontSize = '13px';
+    infoBox.style.fontWeight = 'bold';
+
+    if (saldoDisp <= 0) {
+        infoBox.style.background = '#fef2f2';
+        infoBox.style.border = '1px solid #fecaca';
+        infoBox.style.color = '#991b1b';
+        infoBox.innerHTML = `⚠️ <strong>Atenção:</strong> Este lote não possui saldo ativo em estoque de ${embalagem} para dar baixa.`;
+    } else {
+        infoBox.style.background = '#f0fdf4';
+        infoBox.style.border = '1px solid #bbf7d0';
+        infoBox.style.color = '#166534';
+        let textoApos = qtdDigitada > 0 ? ` &bull; Saldo restante após baixa: <strong style="color: #15803d;">${saldoApos} ${embalagem}</strong>` : '';
+        infoBox.innerHTML = `📦 Saldo disponível para baixa: <span style="font-size: 15px; color: #15803d;">${saldoDisp} ${embalagem}(s)</span>${textoApos}`;
+    }
+
+    if (campoQtd && saldoDisp > 0) {
+        campoQtd.max = saldoDisp;
+    }
 }
 
 function atualizarResumoEstoque() {
@@ -1504,17 +1699,25 @@ function atualizarResumoEstoque() {
     cadastros.saida.forEach(sai => {
         let chave = `${sai.localId || 0}_${sai.produtoId || 0}_${sai.controleId}`;
         if (!saldos[chave]) {
-            saldos[chave] = { 
-                localId: sai.localId, 
-                produtoId: sai.produtoId, 
-                controleId: sai.controleId, 
-                glebaId: sai.glebaId,
-                glebasSet: new Set(), 
-                variedadesSet: new Set(), 
-                caixas: 0, 
-                contentores: 0, 
-                sacos: 0 
-            };
+            let chaveCompativel = Object.keys(saldos).find(k => {
+                let s = saldos[k];
+                return s.controleId === sai.controleId && s.produtoId === sai.produtoId;
+            });
+            if (chaveCompativel) {
+                chave = chaveCompativel;
+            } else {
+                saldos[chave] = { 
+                    localId: sai.localId, 
+                    produtoId: sai.produtoId, 
+                    controleId: sai.controleId, 
+                    glebaId: sai.glebaId,
+                    glebasSet: new Set(), 
+                    variedadesSet: new Set(), 
+                    caixas: 0, 
+                    contentores: 0, 
+                    sacos: 0 
+                };
+            }
         }
         if(sai.glebaId) saldos[chave].glebasSet.add(sai.glebaId);
         if(sai.variedadeId) saldos[chave].variedadesSet.add(sai.variedadeId);
@@ -1701,10 +1904,47 @@ function abrirAbaListaEntrada() {
         `;
     }
     document.getElementById('tituloAba').textContent = '📥 Histórico de Entradas';
-    let html = cadastros.entrada.length === 0 ? '<p class="vazio">Nenhuma entrada</p>' : `<table class="tabela"><thead><tr><th style="color:white; background:#1f7294;">Data</th><th style="color:white; background:#1f7294;">Local</th><th style="color:white; background:#1f7294;">Produto</th><th style="color:white; background:#1f7294;">Controle</th><th style="color:white; background:#1f7294;">Qtd</th><th style="color:white; background:#1f7294; text-align:center; width: 80px;">Ações</th></tr></thead><tbody>`;
+    let html = cadastros.entrada.length === 0 ? '<p class="vazio">Nenhuma entrada</p>' : `<table class="tabela"><thead><tr>
+        <th style="color:white; background:#1f7294;">Data</th>
+        <th style="color:white; background:#1f7294;">Local</th>
+        <th style="color:white; background:#1f7294;">Produto</th>
+        <th style="color:white; background:#1f7294;">Controle</th>
+        <th style="color:white; background:#1f7294;">Qtd Entrada</th>
+        <th style="color:white; background:#1f7294; text-align: center;">Baixas (Saídas)</th>
+        <th style="color:white; background:#1f7294; text-align: center;">Saldo Atual</th>
+        <th style="color:white; background:#1f7294; text-align:center; width: 80px;">Ações</th>
+    </tr></thead><tbody>`;
+
+    let baixasPorEntrada = calcularBaixasEntradas();
     cadastros.entrada.forEach(l => {
         let dataBR = l.data ? l.data.split('-').reverse().join('/') : '-';
-        html += `<tr><td>${dataBR}</td><td>${cadastros.local.find(x => x.id === l.localId)?.nome || '-'}</td><td>${cadastros.produto.find(x => x.id === l.produtoId)?.nome || '-'}</td><td>${cadastros.controle.find(x => x.id === l.controleId)?.cod || '-'}</td><td>${l.qtd} (${l.embalagem})</td><td class="acoes"><button class="btn-acao" onclick="editarEntrada(${l.id})">${SVG_EDITAR}</button><button class="btn-acao" onclick="excluirEntrada(${l.id})">${SVG_EXCLUIR}</button></td></tr>`;
+        let statusBaixa = baixasPorEntrada[l.id] || { qtdOriginal: parseInt(l.qtd || 0), qtdBaixada: 0, saldoRestante: parseInt(l.qtd || 0) };
+        let baixadaTxt = statusBaixa.qtdBaixada > 0 
+            ? `<span style="color: #b91c1c; font-weight: bold; background: #fee2e2; padding: 2px 6px; border-radius: 4px;">-${statusBaixa.qtdBaixada}</span>` 
+            : `<span style="color: #64748b;">0</span>`;
+        
+        let saldoBadge = '';
+        if (statusBaixa.saldoRestante === 0) {
+            saldoBadge = `<span style="color: #475569; font-weight: bold; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; border: 1px solid #cbd5e1;">0 (Baixado)</span>`;
+        } else if (statusBaixa.qtdBaixada > 0) {
+            saldoBadge = `<span style="color: #15803d; font-weight: bold; background: #dcfce7; padding: 2px 8px; border-radius: 4px; border: 1px solid #86efac;">${statusBaixa.saldoRestante} (${l.embalagem})</span>`;
+        } else {
+            saldoBadge = `<strong style="color: #1b5e20;">${statusBaixa.saldoRestante} (${l.embalagem})</strong>`;
+        }
+
+        html += `<tr>
+            <td>${dataBR}</td>
+            <td>${cadastros.local.find(x => x.id === l.localId)?.nome || '-'}</td>
+            <td>${cadastros.produto.find(x => x.id === l.produtoId)?.nome || '-'}</td>
+            <td>${cadastros.controle.find(x => x.id === l.controleId)?.cod || '-'}</td>
+            <td>${l.qtd} (${l.embalagem})</td>
+            <td style="text-align: center;">${baixadaTxt}</td>
+            <td style="text-align: center;">${saldoBadge}</td>
+            <td class="acoes">
+                <button class="btn-acao" onclick="editarEntrada(${l.id})">${SVG_EDITAR}</button>
+                <button class="btn-acao" onclick="excluirEntrada(${l.id})">${SVG_EXCLUIR}</button>
+            </td>
+        </tr>`;
     });
     document.getElementById('conteudoAba').innerHTML = html + '</tbody></table>';
     abrirAbaDetalhesGeral();
@@ -1821,8 +2061,19 @@ function renderizarListaEntradaEmbutida() {
         return;
     }
 
+    let baixasPorEntrada = calcularBaixasEntradas();
     let copia = [...lista].reverse();
-    let html = `<table class="tabela"><thead><tr><th style="background: #1b5e20; color: white;">Data</th><th style="background: #1b5e20; color: white;">Controle</th><th style="background: #1b5e20; color: white;">Produto</th><th style="background: #1b5e20; color: white;">Local</th><th style="background: #1b5e20; color: white;">Qtd</th><th style="background: #1b5e20; color: white; text-align: center; width: 70px;">Ações</th></tr></thead><tbody>`;
+    let html = `<table class="tabela"><thead><tr>
+        <th style="background: #1b5e20; color: white;">Data</th>
+        <th style="background: #1b5e20; color: white;">Controle</th>
+        <th style="background: #1b5e20; color: white;">Produto</th>
+        <th style="background: #1b5e20; color: white;">Local</th>
+        <th style="background: #1b5e20; color: white;">Qtd Entrada</th>
+        <th style="background: #1b5e20; color: white; text-align: center;">Baixas (Saídas)</th>
+        <th style="background: #1b5e20; color: white; text-align: center;">Saldo Atual</th>
+        <th style="background: #1b5e20; color: white; text-align: center; width: 70px;">Ações</th>
+    </tr></thead><tbody>`;
+
     copia.forEach(l => {
         let dataBR = l.data ? l.data.split('-').reverse().join('/') : '-';
         let ctrlCod = cadastros.controle.find(c => c.id === l.controleId)?.cod || '-';
@@ -1831,7 +2082,34 @@ function renderizarListaEntradaEmbutida() {
         let prodNome = limparNomeProduto(prodObj?.nome || '-');
         let prodExibir = prodCod ? `${prodCod} - ${prodNome}` : prodNome;
         let locNome = limparNomeGalpao(cadastros.local.find(x => x.id === l.localId)?.nome || '-');
-        html += `<tr><td>${dataBR}</td><td><strong>${ctrlCod}</strong></td><td><strong>${prodExibir}</strong></td><td>${locNome}</td><td style="font-weight: bold; color: #1b5e20;">${l.qtd} (${l.embalagem})</td><td class="acoes"><button class="btn-acao" onclick="editarEntrada(${l.id})" title="Editar">${SVG_EDITAR}</button><button class="btn-acao" onclick="excluirEntrada(${l.id})" title="Excluir">${SVG_EXCLUIR}</button></td></tr>`;
+
+        let statusBaixa = baixasPorEntrada[l.id] || { qtdOriginal: parseInt(l.qtd || 0), qtdBaixada: 0, saldoRestante: parseInt(l.qtd || 0) };
+        let baixadaTxt = statusBaixa.qtdBaixada > 0 
+            ? `<span style="color: #b91c1c; font-weight: bold; background: #fee2e2; padding: 2px 6px; border-radius: 4px;">-${statusBaixa.qtdBaixada}</span>` 
+            : `<span style="color: #64748b;">0</span>`;
+        
+        let saldoBadge = '';
+        if (statusBaixa.saldoRestante === 0) {
+            saldoBadge = `<span style="color: #475569; font-weight: bold; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; border: 1px solid #cbd5e1;">0 (Baixado)</span>`;
+        } else if (statusBaixa.qtdBaixada > 0) {
+            saldoBadge = `<span style="color: #15803d; font-weight: bold; background: #dcfce7; padding: 2px 8px; border-radius: 4px; border: 1px solid #86efac;">${statusBaixa.saldoRestante} (${l.embalagem})</span>`;
+        } else {
+            saldoBadge = `<strong style="color: #1b5e20;">${statusBaixa.saldoRestante} (${l.embalagem})</strong>`;
+        }
+
+        html += `<tr>
+            <td>${dataBR}</td>
+            <td><strong>${ctrlCod}</strong></td>
+            <td><strong>${prodExibir}</strong></td>
+            <td>${locNome}</td>
+            <td style="font-weight: 600; color: #1e293b;">${l.qtd} (${l.embalagem})</td>
+            <td style="text-align: center;">${baixadaTxt}</td>
+            <td style="text-align: center;">${saldoBadge}</td>
+            <td class="acoes">
+                <button class="btn-acao" onclick="editarEntrada(${l.id})" title="Editar">${SVG_EDITAR}</button>
+                <button class="btn-acao" onclick="excluirEntrada(${l.id})" title="Excluir">${SVG_EXCLUIR}</button>
+            </td>
+        </tr>`;
     });
     html += '</tbody></table>';
     container.innerHTML = html;
@@ -1917,32 +2195,84 @@ function salvarEntrada() {
 
 function salvarSaida() {
     const id = document.getElementById('idSaida').value;
-    const obj = { id: id ? parseInt(id) : Date.now(), data: document.getElementById('dataSaida').value, controleId: +document.getElementById('controleSaida').value, glebaId: +document.getElementById('glebaSaida').value, variedadeId: +document.getElementById('variedadeSaida').value, produtoId: +document.getElementById('produtoSaida').value, localId: +document.getElementById('localSaida').value, embalagem: document.getElementById('embalagemSaida').value, qtd: parseInt(document.getElementById('qtdSaida').value) };
-    if (!obj.controleId || !obj.glebaId || !obj.produtoId || !obj.localId || !obj.embalagem || !obj.qtd) return mostrarMsg('Preencha todos os campos', 'erro', 'msgSaida');
-    
+    let ctrlId = +document.getElementById('controleSaida').value;
+    let prodId = +document.getElementById('produtoSaida').value;
+    let glebaId = +document.getElementById('glebaSaida').value;
+    let variedadeId = +document.getElementById('variedadeSaida').value;
+    let localId = +document.getElementById('localSaida').value;
+    let embalagem = document.getElementById('embalagemSaida').value;
+    let qtd = parseInt(document.getElementById('qtdSaida').value);
+    let dataSaida = document.getElementById('dataSaida').value;
+
+    if (!ctrlId || !prodId || !qtd) {
+        return mostrarMsg('Preencha os campos obrigatórios: Controle, Produto e Quantidade!', 'erro', 'msgSaida');
+    }
+
+    // Se gleba, variedade, local ou embalagem não estiverem definidos, herda da entrada correspondente
+    let entDoLote = (cadastros.entrada || []).find(e => e.controleId === ctrlId && e.produtoId === prodId)
+                 || (cadastros.entrada || []).find(e => e.controleId === ctrlId);
+
+    if (entDoLote) {
+        if (!glebaId) glebaId = entDoLote.glebaId;
+        if (!variedadeId) variedadeId = entDoLote.variedadeId;
+        if (!localId) localId = entDoLote.localId;
+        if (!embalagem) embalagem = entDoLote.embalagem || 'Saco';
+    }
+    if (!embalagem) embalagem = 'Saco';
+
+    const obj = {
+        id: id ? parseInt(id) : Date.now(),
+        data: dataSaida || dataHoje(),
+        controleId: ctrlId,
+        glebaId: glebaId,
+        variedadeId: variedadeId,
+        produtoId: prodId,
+        localId: localId,
+        embalagem: embalagem,
+        qtd: qtd
+    };
+
     let saldos = obterSaldosAtuais();
     let apiKey = `${obj.localId}_${obj.produtoId}_${obj.controleId}`;
+    let itemSaldo = saldos[apiKey];
+    if (!itemSaldo) {
+        let compKey = Object.keys(saldos).find(k => saldos[k].controleId === obj.controleId && saldos[k].produtoId === obj.produtoId);
+        if (compKey) itemSaldo = saldos[compKey];
+    }
+
     let saldoDisponivel = 0;
-    if (saldos[apiKey]) {
-        if (obj.embalagem === 'Caixa') saldoDisponivel = saldos[apiKey].caixas;
-        else if (obj.embalagem === 'Contentor') saldoDisponivel = saldos[apiKey].contentores;
-        else if (obj.embalagem === 'Saco') saldoDisponivel = saldos[apiKey].sacos;
+    if (itemSaldo) {
+        if (obj.embalagem === 'Caixa') saldoDisponivel = itemSaldo.caixas;
+        else if (obj.embalagem === 'Contentor') saldoDisponivel = itemSaldo.contentores;
+        else saldoDisponivel = itemSaldo.sacos;
     }
     
-    if(id) {
+    if (id) {
         let registroAntigo = cadastros.saida.find(s => s.id === parseInt(id));
-        if(registroAntigo && registroAntigo.embalagem === obj.embalagem && registroAntigo.localId === obj.localId && registroAntigo.produtoId === obj.produtoId && registroAntigo.controleId === obj.controleId) {
+        if (registroAntigo && registroAntigo.embalagem === obj.embalagem && registroAntigo.produtoId === obj.produtoId && registroAntigo.controleId === obj.controleId) {
             saldoDisponivel += registroAntigo.qtd;
         }
     }
 
-    // NOVA REGRA: Só barra se a quantidade for maior que o saldo E se o usuário NÃO puder furar o estoque
     if (obj.qtd > saldoDisponivel && !usuarioLogado.podeFurarEstoque) {
-        return mostrarMsg(`Saldo insuficiente! Disponível: ${saldoDisponivel}`, 'erro', 'msgSaida');
+        return mostrarMsg(`Saldo insuficiente na entrada! Saldo disponível: ${saldoDisponivel} (${obj.embalagem})`, 'erro', 'msgSaida');
     }
 
-    if (id) { const idx = cadastros.saida.findIndex(l => l.id === obj.id); if (idx >= 0) cadastros.saida[idx] = obj; } else { cadastros.saida.push(obj); }
-    salvarDados(); cancelarEdicao('saida'); mostrarMsg('Saída registrada!', 'sucesso', 'msgSaida'); atualizarResumoEstoque(); renderizarListaSaidaEmbutida();
+    if (id) { 
+        const idx = cadastros.saida.findIndex(l => l.id === obj.id); 
+        if (idx >= 0) cadastros.saida[idx] = obj; 
+    } else { 
+        cadastros.saida.push(obj); 
+    }
+
+    salvarDados(); 
+    cancelarEdicao('saida'); 
+    let novoSaldo = Math.max(0, saldoDisponivel - obj.qtd);
+    mostrarMsg(`✅ Saída de ${obj.qtd} (${obj.embalagem}) lançada com sucesso! Baixa efetuada na entrada (Saldo restante: ${novoSaldo}).`, 'sucesso', 'msgSaida'); 
+    atualizarResumoEstoque(); 
+    renderizarListaSaidaEmbutida();
+    renderizarListaEntradaEmbutida();
+    carregarListasComuns('saida');
 }
 
 
@@ -2028,6 +2358,7 @@ function excluirEntrada(id) {
     }
     atualizarResumoEstoque(); 
     renderizarListaEntradaEmbutida();
+    renderizarListaSaidaEmbutida();
     carregarListasComuns('saida');
     mostrarMsg('Entrada excluída com sucesso!', 'sucesso', 'msgEntrada');
 }
@@ -2037,7 +2368,7 @@ function excluirSaida(id) {
         alert('Você não tem permissão para excluir registros!'); 
         return; 
     }
-    if (!confirm('Deseja realmente excluir esta saída de estoque?')) return; 
+    if (!confirm('Deseja realmente excluir esta saída de estoque? O saldo correspondente será estornado na entrada.')) return; 
     cadastros.saida = cadastros.saida.filter(l => l.id != id); 
     salvarDados(); 
     const abaDetalhes = document.getElementById('abaDetalhes');
@@ -2046,7 +2377,9 @@ function excluirSaida(id) {
     }
     atualizarResumoEstoque(); 
     renderizarListaSaidaEmbutida();
-    mostrarMsg('Saída excluída com sucesso!', 'sucesso', 'msgSaida');
+    renderizarListaEntradaEmbutida();
+    carregarListasComuns('saida');
+    mostrarMsg('✅ Saída excluída com sucesso! Saldo estornado para a entrada.', 'sucesso', 'msgSaida');
 }
 
 function atualizarTipoInputValor() {
@@ -3623,17 +3956,23 @@ function executarImportacaoFinal() {
             const loc = obterOuCriarLocal(cult.id, l.local);
             const ctrl = obterOuCriarControle(l.controle, faz.id, cult.id, piv.id, gle.id);
 
+            let entCtrl = (cadastros.entrada || []).find(e => e.controleId === ctrl.id && e.produtoId === prod.id)
+                       || (cadastros.entrada || []).find(e => e.controleId === ctrl.id);
             let finalGlebaId = gle.id;
             let finalVariedadeId = varItem.id;
-            let entCtrl = (cadastros.entrada || []).find(e => e.controleId === ctrl.id);
+            let finalLocalId = loc.id;
             if (entCtrl) {
                 let nomeGleba = normalizarTexto(gle.nome);
-                if (nomeGleba === '1' || nomeGleba === 'gleba 1' || nomeGleba === '') {
+                if (nomeGleba === '1' || nomeGleba === 'gleba 1' || nomeGleba === '' || entCtrl.glebaId) {
                     finalGlebaId = entCtrl.glebaId;
                 }
                 let nomeVar = normalizarTexto(varItem.nome);
-                if (nomeVar === 'padrao' || nomeVar === '') {
+                if (nomeVar === 'padrao' || nomeVar === '' || entCtrl.variedadeId) {
                     finalVariedadeId = entCtrl.variedadeId;
+                }
+                let nomeLoc = normalizarTexto(loc.nome);
+                if (nomeLoc === 'armazem geral' || nomeLoc === 'geral' || nomeLoc === '' || entCtrl.localId) {
+                    finalLocalId = entCtrl.localId;
                 }
             }
 
@@ -3644,7 +3983,7 @@ function executarImportacaoFinal() {
                 glebaId: finalGlebaId,
                 variedadeId: finalVariedadeId,
                 produtoId: prod.id,
-                localId: loc.id,
+                localId: finalLocalId,
                 embalagem: l.embalagem || 'Saco',
                 qtd: parseInt(l.qtd) || 0
             });
@@ -3655,6 +3994,7 @@ function executarImportacaoFinal() {
         carregarListasComuns('entrada');
         carregarListasComuns('saida');
         renderizarListaSaidaEmbutida();
+        renderizarListaEntradaEmbutida();
 
         mostrarMsgImportacao(`🎉 Sucesso! <strong>${validas.length} saídas de estoque</strong> foram importadas e vinculadas aos cadastros com sucesso!`, 'sucesso');
     } else if (dadosPreviaProcessados.tipo === 'cadastro') {
