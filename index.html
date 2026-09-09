@@ -2657,47 +2657,47 @@ function exportarEntradasExcel() {
         return;
     }
 
-    const dados = [
-        ["Data", "Controle", "Fazenda", "Cultura", "Pivô", "Gleba", "Variedade", "Produto", "Local de Armazenamento", "Embalagem", "Quantidade"]
-    ];
+    const XLSX = obterXLSX();
+    const cabecalho = ["Data", "Cultura", "Variedade", "Projeto", "Lote", "Local", "GLEBA", "Classificação", "Embalagem", "Qtd Embalagem"];
+    const dados = [cabecalho];
 
     lista.forEach(l => {
         const ctrl = cadastros.controle.find(c => c.id === l.controleId);
-        const fazNome = ctrl ? (cadastros.fazenda.find(f => f.id === ctrl.fazendaId)?.nome || '-') : '-';
-        const cultNome = ctrl ? (cadastros.cultura.find(c => c.id === ctrl.culturaId)?.nome || '-') : '-';
-        const pivoNome = ctrl ? limparNomePivo(cadastros.pivo.find(p => p.id === ctrl.pivoId)?.nome || '-') : '-';
-        const glebaNome = cadastros.gleba.find(g => g.id === l.glebaId)?.nome || '-';
-        const varNome = cadastros.variedade.find(v => v.id === l.variedadeId)?.nome || '-';
-        const prodNome = limparNomeProduto(cadastros.produto.find(p => p.id === l.produtoId)?.nome || '-');
-        const locNome = limparNomeGalpao(cadastros.local.find(x => x.id === l.localId)?.nome || '-');
-        const dataBR = l.data ? l.data.split('-').reverse().join('/') : '-';
+        const fazNome = ctrl ? (cadastros.fazenda.find(f => f.id === ctrl.fazendaId)?.nome || '') : '';
+        const cultNome = ctrl ? (cadastros.cultura.find(c => c.id === ctrl.culturaId)?.nome || '') : '';
+        const pivoNome = ctrl ? limparNomePivo(cadastros.pivo.find(p => p.id === ctrl.pivoId)?.nome || '') : '';
+        const glebaNome = l.glebaId ? (cadastros.gleba.find(g => g.id === l.glebaId)?.nome || '') : '';
+        const varNome = cadastros.variedade.find(v => v.id === l.variedadeId)?.nome || '';
+        const prodNome = limparNomeProduto(cadastros.produto.find(p => p.id === l.produtoId)?.nome || '');
+        const locNome = limparNomeGalpao(cadastros.local.find(x => x.id === l.localId)?.nome || '');
+        const dataBR = l.data ? l.data.split('-').reverse().join('/') : '';
+        const projeto = ctrl?.identificacao || (cultNome && fazNome ? `${cultNome} - ${fazNome} - ${pivoNome}` : '');
 
         dados.push([
             dataBR,
-            ctrl?.cod || '-',
-            fazNome,
             cultNome,
-            pivoNome,
-            glebaNome,
             varNome,
-            prodNome,
+            projeto,
+            ctrl?.cod || ctrl?.nome || 'CRT-001',
             locNome,
-            l.embalagem || '-',
+            glebaNome,
+            prodNome,
+            l.embalagem || 'Saco',
             Number(l.qtd) || 0
         ]);
     });
 
-    if (typeof XLSX !== 'undefined') {
+    if (typeof XLSX !== 'undefined' && XLSX) {
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.aoa_to_sheet(dados);
         XLSX.utils.book_append_sheet(wb, ws, "Entradas");
-        XLSX.writeFile(wb, "entradas_estoque.xlsx");
+        XLSX.writeFile(wb, `relatorio_entradas_${dataHoje()}.xlsx`);
     } else {
         let csvContent = "data:text/csv;charset=utf-8,\uFEFF" + dados.map(e => e.map(val => `"${val}"`).join(";")).join("\n");
         let encodedUri = encodeURI(csvContent);
         let link = document.createElement("a");
         link.setAttribute("href", encodedUri);
-        link.setAttribute("download", "entradas_estoque.csv");
+        link.setAttribute("download", `relatorio_entradas_${dataHoje()}.csv`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -3039,7 +3039,7 @@ function atualizarInfoColunasModelo() {
     if (!info) return;
 
     if (destinoImportacaoAtual === 'entrada') {
-        info.innerHTML = '<strong>Colunas recomendadas para Entrada:</strong> Data, Controle, Fazenda, Cultura, Pivô, Gleba, Variedade, Produto, Local, Embalagem, Quantidade.';
+        info.innerHTML = '<strong>Formato de Colunas Aceito (igual à sua planilha Excel):</strong><br><code>Data</code> | <code>Cultura</code> | <code>Variedade</code> | <code>Projeto</code> | <code>Lote</code> | <code>Local</code> | <code>GLEBA</code> | <code>Classificação</code> | <code>Embalagem</code> | <code>Qtd Embalagem</code>.<br><span style="font-size: 11px; color: #15803d;">✔ Suporta números formatados (ex: 1.977,00), código CRT, armazém H9 e embalagens (Saco, Contentor, Bags G).</span>';
     } else if (destinoImportacaoAtual === 'saida') {
         info.innerHTML = '<strong>Colunas recomendadas para Saída:</strong> Data, Controle, Variedade, Produto, Local, Embalagem, Quantidade.';
     } else {
@@ -3072,12 +3072,17 @@ function baixarModeloExcelAtual() {
     const wb = XLSX.utils.book_new();
 
     if (destinoImportacaoAtual === 'entrada') {
-        const cabecalho = ["Data", "Controle", "Fazenda", "Cultura", "Pivô", "Gleba", "Variedade", "Produto", "Local", "Embalagem", "Quantidade"];
+        const cabecalho = ["Data", "Cultura", "Variedade", "Projeto", "Lote", "Local", "GLEBA", "Classificação", "Embalagem", "Qtd Embalagem"];
         const dadosExemplo = [
             cabecalho,
-            ["2025-05-10", "CTR-01", "Fazenda Santa Maria", "Milho", "Pivô Central 01", "Gleba A", "P30F53", "Milho Grão Verde", "Galpão 01", "Saco", 120],
-            ["2025-05-11", "CTR-02", "Fazenda Vista Alegre", "Soja", "Pivô Sul", "Talhão 02", "TMG 7062", "Soja Grão Limpo", "Silo 02", "Contentor", 85],
-            ["2025-05-12", "CTR-01", "Fazenda Santa Maria", "Milho", "Pivô Central 01", "Gleba B", "P30F53", "Milho Comercial", "Câmara Fria", "Caixa", 200]
+            ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "CALIBRE 01", "Saco", "179,00"],
+            ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "CALIBRE 02", "Saco", "951,00"],
+            ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "CALIBRE 03", "Saco", "1.977,00"],
+            ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "CALIBRE 3G", "Saco", "1.050,00"],
+            ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "CALIBRE 04", "Saco", "62,00"],
+            ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "MINI", "Saco", "10,00"],
+            ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "SEM PELE", "Contentor", "1.310,00"],
+            ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "DESCARTE", "Bags G", "20,00"]
         ];
         const ws = XLSX.utils.aoa_to_sheet(dadosExemplo);
         XLSX.utils.book_append_sheet(wb, ws, "Entradas");
@@ -3086,9 +3091,9 @@ function baixarModeloExcelAtual() {
         const cabecalho = ["Data", "Controle", "Variedade", "Produto", "Local", "Embalagem", "Quantidade"];
         const dadosExemplo = [
             cabecalho,
-            ["2025-05-15", "CTR-01", "P30F53", "Milho Grão Verde", "Galpão 01", "Saco", 30],
-            ["2025-05-16", "CTR-02", "TMG 7062", "Soja Grão Limpo", "Silo 02", "Contentor", 25],
-            ["2025-05-17", "CTR-01", "P30F53", "Milho Comercial", "Câmara Fria", "Caixa", 50]
+            ["08/09/2026", "CRT-2025/26-0405", "Topazio", "CALIBRE 01", "H9", "Saco", 30],
+            ["08/09/2026", "CRT-2025/26-0405", "Topazio", "CALIBRE 02", "H9", "Saco", 50],
+            ["08/09/2026", "CRT-2025/26-0405", "Topazio", "SEM PELE", "H9", "Contentor", 100]
         ];
         const ws = XLSX.utils.aoa_to_sheet(dadosExemplo);
         XLSX.utils.book_append_sheet(wb, ws, "Saídas");
@@ -3096,48 +3101,48 @@ function baixarModeloExcelAtual() {
     } else {
         const wsCulturas = XLSX.utils.aoa_to_sheet([
             ["Código", "Nome"],
-            ["MILHO", "Milho"],
-            ["SOJA", "Soja"],
-            ["ALGODAO", "Algodão"]
+            ["CEBOLA", "Cebola"],
+            ["CENOURA", "Cenoura"]
         ]);
         const wsVariedades = XLSX.utils.aoa_to_sheet([
             ["Cultura", "Nome"],
-            ["Milho", "P30F53"],
-            ["Milho", "DKB 390"],
-            ["Soja", "TMG 7062"]
+            ["Cebola", "Topazio"],
+            ["Cenoura", "Brasília"]
         ]);
         const wsProdutos = XLSX.utils.aoa_to_sheet([
             ["Cultura", "Código", "Nome"],
-            ["Milho", "PRD-MIL-01", "Milho Grão Verde"],
-            ["Milho", "PRD-MIL-02", "Milho Comercial"],
-            ["Soja", "PRD-SOJ-01", "Soja Grão Limpo"]
+            ["Cebola", "CALIBRE 01", "CALIBRE 01"],
+            ["Cebola", "CALIBRE 02", "CALIBRE 02"],
+            ["Cebola", "CALIBRE 03", "CALIBRE 03"],
+            ["Cebola", "CALIBRE 3G", "CALIBRE 3G"],
+            ["Cebola", "CALIBRE 04", "CALIBRE 04"],
+            ["Cebola", "MINI", "MINI"],
+            ["Cebola", "SEM PELE", "SEM PELE"],
+            ["Cebola", "DESCARTE", "DESCARTE"]
         ]);
         const wsLocais = XLSX.utils.aoa_to_sheet([
             ["Cultura", "Nome"],
-            ["Milho", "Galpão 01"],
-            ["Milho", "Câmara Fria"],
-            ["Soja", "Silo 02"]
+            ["Cebola", "H9"],
+            ["Cebola", "Galpão 01"]
         ]);
         const wsFazendas = XLSX.utils.aoa_to_sheet([
             ["Nome"],
-            ["Fazenda Santa Maria"],
-            ["Fazenda Vista Alegre"]
+            ["IPE"],
+            ["Fazenda Ipê"]
         ]);
         const wsGlebas = XLSX.utils.aoa_to_sheet([
             ["Nome"],
-            ["Gleba A"],
-            ["Gleba B"],
-            ["Talhão 02"]
+            ["Gleba 1"],
+            ["Gleba 2"]
         ]);
         const wsPivos = XLSX.utils.aoa_to_sheet([
             ["Nome"],
-            ["Pivô Central 01"],
-            ["Pivô Sul"]
+            ["PIVO 10"],
+            ["Pivô 10"]
         ]);
         const wsControles = XLSX.utils.aoa_to_sheet([
-            ["Controle", "Fazenda", "Cultura", "Pivô", "Glebas"],
-            ["CTR-01", "Fazenda Santa Maria", "Milho", "Pivô Central 01", "Gleba A, Gleba B"],
-            ["CTR-02", "Fazenda Vista Alegre", "Soja", "Pivô Sul", "Talhão 02"]
+            ["Controle", "Fazenda", "Cultura", "Pivô", "Glebas", "Identificação"],
+            ["CRT-2025/26-0405", "IPE", "Cebola", "PIVO 10", "", "CEBOLA - IPE - PIVO 10 - 2025/26"]
         ]);
 
         XLSX.utils.book_append_sheet(wb, wsCulturas, "Culturas");
@@ -3160,24 +3165,30 @@ function baixarModeloCSVAtual() {
     if (destinoImportacaoAtual === 'entrada') {
         nomeArquivo = "modelo_importacao_entradas.csv";
         linhas = [
-            "Data;Controle;Fazenda;Cultura;Pivô;Gleba;Variedade;Produto;Local;Embalagem;Quantidade",
-            "2025-05-10;CTR-01;Fazenda Santa Maria;Milho;Pivô Central 01;Gleba A;P30F53;Milho Grão Verde;Galpão 01;Saco;120",
-            "2025-05-11;CTR-02;Fazenda Vista Alegre;Soja;Pivô Sul;Talhão 02;TMG 7062;Soja Grão Limpo;Silo 02;Contentor;85"
+            "Data;Cultura;Variedade;Projeto;Lote;Local;GLEBA;Classificação;Embalagem;Qtd Embalagem",
+            "08/09/2026;Cebola;Topazio;CEBOLA - IPE - PIVO 10 - 2025/26;CRT-2025/26-0405;H9;;CALIBRE 01;Saco;179,00",
+            "08/09/2026;Cebola;Topazio;CEBOLA - IPE - PIVO 10 - 2025/26;CRT-2025/26-0405;H9;;CALIBRE 02;Saco;951,00",
+            "08/09/2026;Cebola;Topazio;CEBOLA - IPE - PIVO 10 - 2025/26;CRT-2025/26-0405;H9;;CALIBRE 03;Saco;1.977,00",
+            "08/09/2026;Cebola;Topazio;CEBOLA - IPE - PIVO 10 - 2025/26;CRT-2025/26-0405;H9;;CALIBRE 3G;Saco;1.050,00",
+            "08/09/2026;Cebola;Topazio;CEBOLA - IPE - PIVO 10 - 2025/26;CRT-2025/26-0405;H9;;CALIBRE 04;Saco;62,00",
+            "08/09/2026;Cebola;Topazio;CEBOLA - IPE - PIVO 10 - 2025/26;CRT-2025/26-0405;H9;;MINI;Saco;10,00",
+            "08/09/2026;Cebola;Topazio;CEBOLA - IPE - PIVO 10 - 2025/26;CRT-2025/26-0405;H9;;SEM PELE;Contentor;1.310,00",
+            "08/09/2026;Cebola;Topazio;CEBOLA - IPE - PIVO 10 - 2025/26;CRT-2025/26-0405;H9;;DESCARTE;Bags G;20,00"
         ];
     } else if (destinoImportacaoAtual === 'saida') {
         nomeArquivo = "modelo_importacao_saidas.csv";
         linhas = [
             "Data;Controle;Variedade;Produto;Local;Embalagem;Quantidade",
-            "2025-05-15;CTR-01;P30F53;Milho Grão Verde;Galpão 01;Saco;30",
-            "2025-05-16;CTR-02;TMG 7062;Soja Grão Limpo;Silo 02;Contentor;25"
+            "08/09/2026;CRT-2025/26-0405;Topazio;CALIBRE 01;H9;Saco;30",
+            "08/09/2026;CRT-2025/26-0405;Topazio;CALIBRE 02;H9;Saco;50"
         ];
     } else {
         nomeArquivo = "modelo_importacao_produtos.csv";
         linhas = [
             "Cultura;Código;Nome",
-            "Milho;PRD-MIL-01;Milho Grão Verde",
-            "Milho;PRD-MIL-02;Milho Comercial",
-            "Soja;PRD-SOJ-01;Soja Grão Limpo"
+            "Cebola;CALIBRE 01;CALIBRE 01",
+            "Cebola;CALIBRE 02;CALIBRE 02",
+            "Cebola;SEM PELE;SEM PELE"
         ];
     }
 
@@ -3211,25 +3222,31 @@ function baixarTodosModelos() {
     ]);
 
     const wsEntradas = XLSX.utils.aoa_to_sheet([
-        ["Data", "Controle", "Fazenda", "Cultura", "Pivô", "Gleba", "Variedade", "Produto", "Local", "Embalagem", "Quantidade"],
-        ["2025-05-10", "CTR-01", "Fazenda Santa Maria", "Milho", "Pivô Central 01", "Gleba A", "P30F53", "Milho Grão Verde", "Galpão 01", "Saco", 150],
-        ["2025-05-11", "CTR-02", "Fazenda Vista Alegre", "Soja", "Pivô Sul", "Talhão 02", "TMG 7062", "Soja Grão Limpo", "Silo 02", "Contentor", 80]
+        ["Data", "Cultura", "Variedade", "Projeto", "Lote", "Local", "GLEBA", "Classificação", "Embalagem", "Qtd Embalagem"],
+        ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "CALIBRE 01", "Saco", "179,00"],
+        ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "CALIBRE 02", "Saco", "951,00"],
+        ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "CALIBRE 03", "Saco", "1.977,00"],
+        ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "CALIBRE 3G", "Saco", "1.050,00"],
+        ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "CALIBRE 04", "Saco", "62,00"],
+        ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "MINI", "Saco", "10,00"],
+        ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "SEM PELE", "Contentor", "1.310,00"],
+        ["08/09/2026", "Cebola", "Topazio", "CEBOLA - IPE - PIVO 10 - 2025/26", "CRT-2025/26-0405", "H9", "", "DESCARTE", "Bags G", "20,00"]
     ]);
 
     const wsSaidas = XLSX.utils.aoa_to_sheet([
         ["Data", "Controle", "Variedade", "Produto", "Local", "Embalagem", "Quantidade"],
-        ["2025-05-15", "CTR-01", "P30F53", "Milho Grão Verde", "Galpão 01", "Saco", 40],
-        ["2025-05-16", "CTR-02", "TMG 7062", "Soja Grão Limpo", "Silo 02", "Contentor", 30]
+        ["08/09/2026", "CRT-2025/26-0405", "Topazio", "CALIBRE 01", "H9", "Saco", 30],
+        ["08/09/2026", "CRT-2025/26-0405", "Topazio", "CALIBRE 02", "H9", "Saco", 50]
     ]);
 
-    const wsCulturas = XLSX.utils.aoa_to_sheet([["Código", "Nome"], ["MILHO", "Milho"], ["SOJA", "Soja"]]);
-    const wsProdutos = XLSX.utils.aoa_to_sheet([["Cultura", "Código", "Nome"], ["Milho", "PRD-01", "Milho Grão Verde"], ["Soja", "PRD-02", "Soja Grão Limpo"]]);
-    const wsVariedades = XLSX.utils.aoa_to_sheet([["Cultura", "Nome"], ["Milho", "P30F53"], ["Soja", "TMG 7062"]]);
-    const wsLocais = XLSX.utils.aoa_to_sheet([["Cultura", "Nome"], ["Milho", "Galpão 01"], ["Soja", "Silo 02"]]);
-    const wsFazendas = XLSX.utils.aoa_to_sheet([["Nome"], ["Fazenda Santa Maria"], ["Fazenda Vista Alegre"]]);
-    const wsPivos = XLSX.utils.aoa_to_sheet([["Nome"], ["Pivô Central 01"], ["Pivô Sul"]]);
-    const wsGlebas = XLSX.utils.aoa_to_sheet([["Nome"], ["Gleba A"], ["Talhão 02"]]);
-    const wsControles = XLSX.utils.aoa_to_sheet([["Controle", "Fazenda", "Cultura", "Pivô", "Glebas"], ["CTR-01", "Fazenda Santa Maria", "Milho", "Pivô Central 01", "Gleba A"]]);
+    const wsCulturas = XLSX.utils.aoa_to_sheet([["Código", "Nome"], ["CEBOLA", "Cebola"], ["CENOURA", "Cenoura"]]);
+    const wsProdutos = XLSX.utils.aoa_to_sheet([["Cultura", "Código", "Nome"], ["Cebola", "CALIBRE 01", "CALIBRE 01"], ["Cebola", "SEM PELE", "SEM PELE"]]);
+    const wsVariedades = XLSX.utils.aoa_to_sheet([["Cultura", "Nome"], ["Cebola", "Topazio"], ["Cenoura", "Brasília"]]);
+    const wsLocais = XLSX.utils.aoa_to_sheet([["Cultura", "Nome"], ["Cebola", "H9"], ["Cebola", "Galpão 01"]]);
+    const wsFazendas = XLSX.utils.aoa_to_sheet([["Nome"], ["IPE"], ["Fazenda Ipê"]]);
+    const wsPivos = XLSX.utils.aoa_to_sheet([["Nome"], ["PIVO 10"], ["Pivô 10"]]);
+    const wsGlebas = XLSX.utils.aoa_to_sheet([["Nome"], ["Gleba 1"], ["Gleba 2"]]);
+    const wsControles = XLSX.utils.aoa_to_sheet([["Controle", "Fazenda", "Cultura", "Pivô", "Glebas", "Identificação"], ["CRT-2025/26-0405", "IPE", "Cebola", "PIVO 10", "", "CEBOLA - IPE - PIVO 10 - 2025/26"]]);
 
     XLSX.utils.book_append_sheet(wb, wsInstrucoes, "Como Usar");
     XLSX.utils.book_append_sheet(wb, wsEntradas, "Entradas");
@@ -3351,26 +3368,55 @@ function extrairLinhasDaPlanilha(worksheet) {
     return { cabecalho, dados };
 }
 
+function parsearQuantidade(val) {
+    if (val === null || val === undefined || val === '') return 0;
+    if (typeof val === 'number') return Math.round(val);
+    let s = String(val).trim();
+    if (s.includes(',')) {
+        s = s.replace(/\./g, '').replace(',', '.');
+    } else if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
+        s = s.replace(/\./g, '');
+    }
+    let n = parseFloat(s);
+    return isNaN(n) ? 0 : Math.round(n);
+}
+
 function mapearIndiceColunas(cabecalho) {
     const mapa = {};
     cabecalho.forEach((col, idx) => {
         const norm = normalizarTexto(col);
-        if (/data|dt|dia|date/.test(norm) && !mapa.data) mapa.data = idx;
-        else if (/controle|ctr|safra|lote/.test(norm) && !mapa.controle) mapa.controle = idx;
-        else if (/fazenda|propriedade|farm/.test(norm) && !mapa.fazenda) mapa.fazenda = idx;
-        else if (/cultura|crop/.test(norm) && !mapa.cultura) mapa.cultura = idx;
-        else if (/pivo|pivot/.test(norm) && !mapa.pivo) mapa.pivo = idx;
-        else if (/gleba|talhao|setor|quadra/.test(norm) && !mapa.gleba) mapa.gleba = idx;
-        else if (/variedade|hibrido|variety/.test(norm) && !mapa.variedade) mapa.variedade = idx;
-        else if (/cod.*prod|codigo.*prod/.test(norm) && !mapa.codProduto) mapa.codProduto = idx;
-        else if (/produto|classificacao|item|mercadoria/.test(norm) && !mapa.produto) mapa.produto = idx;
-        else if (/local|armazem|galpao|deposito|silo|camara/.test(norm) && !mapa.local) mapa.local = idx;
-        else if (/embalagem|emb|tipo/.test(norm) && !mapa.embalagem) mapa.embalagem = idx;
-        else if (/quantidade|qtd|quant|volume|unidades|saldo/.test(norm) && !mapa.qtd) mapa.qtd = idx;
-        else if (/identifica|rotulo|tag/.test(norm) && !mapa.identificacao) mapa.identificacao = idx;
-        else if (/codigo|cod/.test(norm) && !mapa.codigo) mapa.codigo = idx;
-        else if (/nome|descricao|desc/.test(norm) && !mapa.nome) mapa.nome = idx;
+        if (!norm) return;
+        if (/data|dt|dia|date/.test(norm) && mapa.data === undefined) mapa.data = idx;
+        else if (/projeto|proj|safra_proj/.test(norm) && mapa.projeto === undefined) mapa.projeto = idx;
+        else if (/controle|ctr|lote|safra/.test(norm) && mapa.controle === undefined) mapa.controle = idx;
+        else if (/fazenda|propriedade|farm/.test(norm) && mapa.fazenda === undefined) mapa.fazenda = idx;
+        else if (/cultura|crop/.test(norm) && mapa.cultura === undefined) mapa.cultura = idx;
+        else if (/pivo|pivot/.test(norm) && mapa.pivo === undefined) mapa.pivo = idx;
+        else if (/gleba|talhao|setor|quadra/.test(norm) && mapa.gleba === undefined) mapa.gleba = idx;
+        else if (/variedade|hibrido|variety/.test(norm) && mapa.variedade === undefined) mapa.variedade = idx;
+        else if (/cod.*prod|codigo.*prod/.test(norm) && mapa.codProduto === undefined) mapa.codProduto = idx;
+        else if (/classificacao|classif|calibre|produto|item|mercadoria/.test(norm) && mapa.produto === undefined) mapa.produto = idx;
+        else if (/local|armazem|galpao|deposito|silo|camara|box|tulha/.test(norm) && mapa.local === undefined) mapa.local = idx;
+        else if (/embalagem|emb|tipo/.test(norm) && mapa.embalagem === undefined) mapa.embalagem = idx;
+        else if (/qtd.*emb|qtd|quantidade|quant|volume|unidades|saldo/.test(norm) && mapa.qtd === undefined) mapa.qtd = idx;
+        else if (/identifica|rotulo|tag/.test(norm) && mapa.identificacao === undefined) mapa.identificacao = idx;
+        else if (/codigo|cod/.test(norm) && mapa.codigo === undefined) mapa.codigo = idx;
+        else if (/nome|descricao|desc/.test(norm) && mapa.nome === undefined) mapa.nome = idx;
     });
+
+    // Se temos Lote e GLEBA e há exatamente uma coluna entre eles, é o Local (ex: "H9")
+    if (mapa.local === undefined && mapa.controle !== undefined && mapa.gleba !== undefined) {
+        if (mapa.gleba === mapa.controle + 2) {
+            mapa.local = mapa.controle + 1;
+        }
+    }
+    // Caso padrão de 10 colunas: Data(0), Cultura(1), Variedade(2), Projeto(3), Lote(4), Local(5), GLEBA(6), Classificação(7), Embalagem(8), Qtd(9)
+    if (mapa.local === undefined && cabecalho.length >= 7) {
+        if (mapa.controle === 4 && (mapa.gleba === 6 || mapa.produto === 7)) {
+            mapa.local = 5;
+        }
+    }
+
     return mapa;
 }
 
@@ -3385,6 +3431,24 @@ function processarAbaEntrada(workbook) {
     }
 
     const mapa = mapearIndiceColunas(cabecalho);
+
+    // Verificação adicional para coluna de Local
+    if (mapa.local === undefined) {
+        let indicesMapeados = Object.values(mapa);
+        for (let colIdx = 0; colIdx < cabecalho.length; colIdx++) {
+            if (!indicesMapeados.includes(colIdx)) {
+                let temValoresLocal = dados.slice(0, 10).some(r => {
+                    let val = String(r[colIdx] || '').trim();
+                    return /^H\d+$/i.test(val) || /^G\d+$/i.test(val) || /galp|armaz|silo|camara/i.test(val);
+                });
+                if (temValoresLocal) {
+                    mapa.local = colIdx;
+                    break;
+                }
+            }
+        }
+    }
+
     const linhasProcessadas = [];
     const novosCadastros = {
         culturas: new Set(),
@@ -3399,32 +3463,53 @@ function processarAbaEntrada(workbook) {
 
     dados.forEach((r, idx) => {
         const data = formatarDataImportada(mapa.data !== undefined ? r[mapa.data] : '');
-        const controle = String(mapa.controle !== undefined ? r[mapa.controle] : '').trim();
-        const fazenda = String(mapa.fazenda !== undefined ? r[mapa.fazenda] : '').trim();
-        const cultura = String(mapa.cultura !== undefined ? r[mapa.cultura] : '').trim();
-        const pivo = String(mapa.pivo !== undefined ? r[mapa.pivo] : '').trim();
-        const gleba = String(mapa.gleba !== undefined ? r[mapa.gleba] : '').trim();
-        const variedade = String(mapa.variedade !== undefined ? r[mapa.variedade] : '').trim();
+        let controle = String(mapa.controle !== undefined ? r[mapa.controle] : '').trim();
+        let fazenda = String(mapa.fazenda !== undefined ? r[mapa.fazenda] : '').trim();
+        let cultura = String(mapa.cultura !== undefined ? r[mapa.cultura] : '').trim();
+        let pivo = String(mapa.pivo !== undefined ? r[mapa.pivo] : '').trim();
+        let gleba = String(mapa.gleba !== undefined ? r[mapa.gleba] : '').trim();
+        let variedade = String(mapa.variedade !== undefined ? r[mapa.variedade] : '').trim();
+        let projeto = String(mapa.projeto !== undefined ? r[mapa.projeto] : '').trim();
+
+        // Se veio coluna Projeto (ex: "CEBOLA - IPE - PIVO 10 - 2025/26"), decompõe os termos faltantes
+        if (projeto) {
+            let partesProj = projeto.split(/\s*[-–—]\s*/);
+            if (partesProj.length >= 2) {
+                if (!cultura) cultura = partesProj[0].trim();
+                if (!fazenda) fazenda = partesProj[1].trim();
+                if (partesProj.length >= 3 && !pivo) {
+                    pivo = partesProj[2].trim();
+                }
+            }
+        }
+
         const produtoRaw = String(mapa.produto !== undefined ? r[mapa.produto] : '').trim();
         const codProdRaw = (mapa.codProduto !== undefined && r[mapa.codProduto]) ? String(r[mapa.codProduto]).trim() : ((mapa.codigo !== undefined && r[mapa.codigo]) ? String(r[mapa.codigo]).trim() : '');
         const { cod: codExtraido, nome: nomeExtraido } = extrairCodigoENomeProduto(produtoRaw, codProdRaw);
         const codigoProduto = codExtraido || codProdRaw;
         const produto = nomeExtraido || produtoRaw;
-        const local = String(mapa.local !== undefined ? r[mapa.local] : '').trim();
+        let local = String(mapa.local !== undefined ? r[mapa.local] : '').trim();
         let embalagem = String(mapa.embalagem !== undefined ? r[mapa.embalagem] : '').trim();
         const qtdRaw = mapa.qtd !== undefined ? r[mapa.qtd] : 0;
-        const qtd = parseInt(String(qtdRaw).replace(/[^\d]/g, '') || 0);
+        const qtd = parsearQuantidade(qtdRaw);
 
         const normEmb = normalizarTexto(embalagem);
         if (normEmb.includes('caixa')) embalagem = 'Caixa';
-        else if (normEmb.includes('contentor') || normEmb.includes('bag') || normEmb.includes('big')) embalagem = 'Contentor';
+        else if (normEmb.includes('contentor') || normEmb.includes('bag') || normEmb.includes('big') || normEmb.includes('cont')) embalagem = 'Contentor';
         else embalagem = 'Saco';
+
+        // Se gleba for vazia e existir gleba no controle existente
+        let ctrlExistente = cadastros.controle.find(c => normalizarTexto(c.cod || c.nome) === normalizarTexto(controle));
+        if (!gleba && ctrlExistente && ctrlExistente.glebasIds && ctrlExistente.glebasIds.length > 0) {
+            let gObj = cadastros.gleba.find(g => g.id === ctrlExistente.glebasIds[0]);
+            if (gObj) gleba = gObj.nome;
+        }
 
         let valido = true;
         let motivoErro = '';
         if (!controle && !produto) {
             valido = false;
-            motivoErro = 'Sem controle e sem produto';
+            motivoErro = 'Sem lote/controle e sem classificação';
         } else if (qtd <= 0) {
             valido = false;
             motivoErro = 'Quantidade zerada ou inválida';
@@ -3432,27 +3517,28 @@ function processarAbaEntrada(workbook) {
 
         if (valido) {
             if (cultura && !cadastros.cultura.some(c => normalizarTexto(c.nome) === normalizarTexto(cultura))) novosCadastros.culturas.add(cultura);
-            if (fazenda && !cadastros.fazenda.some(f => normalizarTexto(f.nome) === normalizarTexto(fazenda))) novosCadastros.fazendas.add(fazenda);
-            if (pivo && !cadastros.pivo.some(p => normalizarTexto(p.nome) === normalizarTexto(pivo))) novosCadastros.pivos.add(pivo);
+            if (fazenda && !cadastros.fazenda.some(f => normalizarTexto(f.nome) === normalizarTexto(fazenda) || normalizarTexto(f.nome).replace(/fazenda/gi, '').trim() === normalizarTexto(fazenda).replace(/fazenda/gi, '').trim())) novosCadastros.fazendas.add(fazenda);
+            if (pivo && !cadastros.pivo.some(p => normalizarTexto(p.nome) === normalizarTexto(pivo) || normalizarTexto(p.nome).replace(/pivo/gi, '').trim() === normalizarTexto(pivo).replace(/pivo/gi, '').trim())) novosCadastros.pivos.add(pivo);
             if (gleba && !cadastros.gleba.some(g => normalizarTexto(g.nome) === normalizarTexto(gleba))) novosCadastros.glebas.add(gleba);
             if (variedade && !cadastros.variedade.some(v => normalizarTexto(v.nome) === normalizarTexto(variedade))) novosCadastros.variedades.add(variedade);
             if (produto && !cadastros.produto.some(pr => normalizarTexto(pr.nome) === normalizarTexto(produto))) novosCadastros.produtos.add(produto);
             if (local && !cadastros.local.some(l => normalizarTexto(l.nome) === normalizarTexto(local))) novosCadastros.locais.add(local);
-            if (controle && !cadastros.controle.some(c => normalizarTexto(c.nome) === normalizarTexto(controle))) novosCadastros.controles.add(controle);
+            if (controle && !cadastros.controle.some(c => normalizarTexto(c.nome || c.cod) === normalizarTexto(controle))) novosCadastros.controles.add(controle);
         }
 
         linhasProcessadas.push({
             id: Date.now() + idx,
             data,
-            controle: controle || 'CTR-PADRAO',
+            controle: controle || 'CRT-PADRAO',
+            projeto: projeto || '',
             fazenda: fazenda || 'Geral',
             cultura: cultura || 'Diversos',
             pivo: pivo || 'Geral',
-            gleba: gleba || 'Gleba 1',
+            gleba: gleba || '',
             variedade: variedade || 'Padrão',
             codigoProduto: codigoProduto,
             produto: produto || 'Produto Geral',
-            local: local || 'Galpão 01',
+            local: local || 'H9',
             embalagem,
             qtd,
             valido,
@@ -3497,10 +3583,12 @@ function renderizarPreviaEntradas(linhas, novos) {
                 <tr>
                     <th>Status</th>
                     <th>Data</th>
-                    <th>Controle</th>
-                    <th>Cultura / Variedade</th>
-                    <th>Produto</th>
+                    <th>Cultura / Var.</th>
+                    <th>Projeto</th>
+                    <th>Lote / Controle</th>
                     <th>Local</th>
+                    <th>Gleba</th>
+                    <th>Classificação (Produto)</th>
                     <th>Emb.</th>
                     <th style="text-align: right;">Qtd</th>
                 </tr>
@@ -3513,18 +3601,20 @@ function renderizarPreviaEntradas(linhas, novos) {
             <tr style="${!l.valido ? 'background: #fee2e2;' : ''}">
                 <td>${l.valido ? '<span style="color: green; font-weight: bold;">✔ OK</span>' : `<span style="color: red; font-weight: bold;" title="${l.motivoErro}">❌ ${l.motivoErro}</span>`}</td>
                 <td>${l.data}</td>
-                <td><strong>${l.controle}</strong></td>
                 <td>${l.cultura} - ${l.variedade}</td>
-                <td>${l.produto}</td>
-                <td>${l.local}</td>
+                <td><span style="font-size: 10px; color: #475569;">${l.projeto || '-'}</span></td>
+                <td><strong>${l.controle}</strong></td>
+                <td>${l.local || '-'}</td>
+                <td>${l.gleba || '-'}</td>
+                <td><strong>${l.produto}</strong></td>
                 <td>${l.embalagem}</td>
-                <td style="text-align: right; font-weight: bold;">${l.qtd}</td>
+                <td style="text-align: right; font-weight: bold;">${l.qtd.toLocaleString('pt-BR')}</td>
             </tr>
         `;
     });
 
     if (linhas.length > 50) {
-        html += `<tr><td colspan="8" style="text-align: center; color: #666; font-style: italic;">... mais ${linhas.length - 50} linhas carregadas ...</td></tr>`;
+        html += `<tr><td colspan="10" style="text-align: center; color: #666; font-style: italic;">... mais ${linhas.length - 50} linhas carregadas ...</td></tr>`;
     }
 
     html += `</tbody></table>`;
@@ -3576,11 +3666,11 @@ function processarAbaSaida(workbook) {
         const local = String(mapa.local !== undefined ? r[mapa.local] : '').trim();
         let embalagem = String(mapa.embalagem !== undefined ? r[mapa.embalagem] : '').trim();
         const qtdRaw = mapa.qtd !== undefined ? r[mapa.qtd] : 0;
-        const qtd = parseInt(String(qtdRaw).replace(/[^\d]/g, '') || 0);
+        const qtd = parsearQuantidade(qtdRaw);
 
         const normEmb = normalizarTexto(embalagem);
         if (normEmb.includes('caixa')) embalagem = 'Caixa';
-        else if (normEmb.includes('contentor') || normEmb.includes('bag') || normEmb.includes('big')) embalagem = 'Contentor';
+        else if (normEmb.includes('contentor') || normEmb.includes('bag') || normEmb.includes('big') || normEmb.includes('cont')) embalagem = 'Contentor';
         else embalagem = 'Saco';
 
         const ctrlObj = cadastros.controle.find(c => normalizarTexto(c.cod || c.nome) === normalizarTexto(controle));
@@ -3919,7 +4009,7 @@ function executarImportacaoFinal() {
 
     function obterOuCriarFazenda(nome) {
         let n = (nome || 'Fazenda Principal').trim();
-        let item = cadastros.fazenda.find(f => normalizarTexto(f.nome) === normalizarTexto(n));
+        let item = cadastros.fazenda.find(f => normalizarTexto(f.nome) === normalizarTexto(n) || normalizarTexto(f.nome).replace(/fazenda/gi, '').trim() === normalizarTexto(n).replace(/fazenda/gi, '').trim());
         if (!item) {
             item = { id: Date.now() + Math.floor(Math.random() * 10000), nome: n };
             cadastros.fazenda.push(item);
@@ -3929,7 +4019,7 @@ function executarImportacaoFinal() {
 
     function obterOuCriarPivo(nome) {
         let n = (nome || 'Pivô 1').trim();
-        let item = cadastros.pivo.find(p => normalizarTexto(p.nome) === normalizarTexto(n));
+        let item = cadastros.pivo.find(p => normalizarTexto(p.nome) === normalizarTexto(n) || normalizarTexto(p.nome).replace(/pivo/gi, '').trim() === normalizarTexto(n).replace(/pivo/gi, '').trim());
         if (!item) {
             item = { id: Date.now() + Math.floor(Math.random() * 10000), nome: n };
             cadastros.pivo.push(item);
@@ -4005,7 +4095,7 @@ function executarImportacaoFinal() {
         return item;
     }
 
-    function obterOuCriarControle(cod, fazendaId, culturaId, pivoId, glebaId) {
+    function obterOuCriarControle(cod, fazendaId, culturaId, pivoId, glebaId, identificacao) {
         let codigo = (cod || 'CTR-001').trim();
         let item = cadastros.controle.find(c => normalizarTexto(c.cod || c.nome) === normalizarTexto(codigo));
         if (!item) {
@@ -4013,15 +4103,24 @@ function executarImportacaoFinal() {
                 id: Date.now() + Math.floor(Math.random() * 10000),
                 cod: codigo,
                 nome: codigo,
+                identificacao: identificacao ? identificacao.trim() : '',
                 fazendaId: fazendaId,
                 culturaId: culturaId,
                 pivoId: pivoId,
                 glebasIds: glebaId ? [glebaId] : []
             };
             cadastros.controle.push(item);
-        } else if (glebaId && (!item.glebasIds || !item.glebasIds.includes(glebaId))) {
-            if (!item.glebasIds) item.glebasIds = [];
-            item.glebasIds.push(glebaId);
+        } else {
+            if (identificacao && (!item.identificacao || item.identificacao.trim() === '')) {
+                item.identificacao = identificacao.trim();
+            }
+            if (fazendaId && !item.fazendaId) item.fazendaId = fazendaId;
+            if (culturaId && !item.culturaId) item.culturaId = culturaId;
+            if (pivoId && !item.pivoId) item.pivoId = pivoId;
+            if (glebaId && (!item.glebasIds || !item.glebasIds.includes(glebaId))) {
+                if (!item.glebasIds) item.glebasIds = [];
+                item.glebasIds.push(glebaId);
+            }
         }
         return item;
     }
@@ -4034,17 +4133,20 @@ function executarImportacaoFinal() {
             const cult = obterOuCriarCultura(l.cultura);
             const faz = obterOuCriarFazenda(l.fazenda);
             const piv = obterOuCriarPivo(l.pivo);
-            const gle = obterOuCriarGleba(l.gleba);
+            let gle = null;
+            if (l.gleba && l.gleba.trim()) {
+                gle = obterOuCriarGleba(l.gleba);
+            }
             const varItem = obterOuCriarVariedade(cult.id, l.variedade);
             const prod = obterOuCriarProduto(cult.id, l.produto, l.codigoProduto);
             const loc = obterOuCriarLocal(cult.id, l.local);
-            const ctrl = obterOuCriarControle(l.controle, faz.id, cult.id, piv.id, gle.id);
+            const ctrl = obterOuCriarControle(l.controle, faz.id, cult.id, piv.id, gle ? gle.id : null, l.projeto);
 
             cadastros.entrada.push({
                 id: Date.now() + Math.floor(Math.random() * 100000),
                 data: l.data || dataHoje(),
                 controleId: ctrl.id,
-                glebaId: gle.id,
+                glebaId: gle ? gle.id : 0,
                 variedadeId: varItem.id,
                 produtoId: prod.id,
                 localId: loc.id,
