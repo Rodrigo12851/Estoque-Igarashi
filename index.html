@@ -770,16 +770,17 @@
             <input type="date" id="dataSaida" disabled>
             <label>Número de Controle</label>
             <select id="controleSaida" onchange="carregarDadosBaseControle('saida')"></select>
+            <div id="painelItensEstoqueLote" style="display: none; margin: 8px 0; padding: 8px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px;"></div>
             <label>Produto (Classificação Comercial)</label>
             <select id="produtoSaida" onchange="atualizarFiltrosCruzadosSaida()"><option value="">Selecione o controle primeiro</option></select>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0;">
                 <div><label>Fazenda</label><input type="text" id="fazendaSaida" disabled></div>
                 <div><label>Cultura</label><input type="text" id="culturaSaida" disabled></div>
                 <div><label>Pivô</label><input type="text" id="pivoSaida" disabled></div>
-                <div><label>Gleba</label><select id="glebaSaida"><option value="">Selecione</option></select></div>
+                <div><label>Gleba</label><select id="glebaSaida" onchange="atualizarExibicaoSaldoSaida()"><option value="">Selecione</option></select></div>
             </div>
             <label>Variedade</label>
-            <select id="variedadeSaida"><option value="">Selecione o produto primeiro</option></select>
+            <select id="variedadeSaida" onchange="atualizarExibicaoSaldoSaida()"><option value="">Selecione o produto primeiro</option></select>
             <label>Local de Armazenamento</label>
             <select id="localSaida" onchange="atualizarExibicaoSaldoSaida()"><option value="">Selecione o produto primeiro</option></select>
             <label>Tipo de Embalagem</label>
@@ -1177,23 +1178,29 @@ function migrarEHarmonizarProdutos() {
             if (entMesmoControle) {
                 let glebaAtual = cadastros.gleba.find(g => g.id === s.glebaId);
                 let nomeGlebaAtual = glebaAtual ? normalizarTexto(glebaAtual.nome) : '';
-                if (!s.glebaId || nomeGlebaAtual === '1' || nomeGlebaAtual === 'gleba 1' || nomeGlebaAtual === '' || (entMesmoControle.glebaId && s.glebaId !== entMesmoControle.glebaId)) {
-                    s.glebaId = entMesmoControle.glebaId;
-                    alterou = true;
+                if (!s.glebaId || nomeGlebaAtual === '1' || nomeGlebaAtual === 'gleba 1' || nomeGlebaAtual === '') {
+                    if (entMesmoControle.glebaId) {
+                        s.glebaId = entMesmoControle.glebaId;
+                        alterou = true;
+                    }
                 }
                 
                 let varAtual = cadastros.variedade.find(v => v.id === s.variedadeId);
                 let nomeVarAtual = varAtual ? normalizarTexto(varAtual.nome) : '';
-                if (!s.variedadeId || nomeVarAtual === 'padrao' || nomeVarAtual === '' || (entMesmoControle.variedadeId && s.variedadeId !== entMesmoControle.variedadeId)) {
-                    s.variedadeId = entMesmoControle.variedadeId;
-                    alterou = true;
+                if (!s.variedadeId || nomeVarAtual === 'padrao' || nomeVarAtual === '') {
+                    if (entMesmoControle.variedadeId) {
+                        s.variedadeId = entMesmoControle.variedadeId;
+                        alterou = true;
+                    }
                 }
 
                 let locAtual = cadastros.local.find(l => l.id === s.localId);
                 let nomeLocAtual = locAtual ? normalizarTexto(locAtual.nome) : '';
-                if (!s.localId || nomeLocAtual === 'armazem geral' || nomeLocAtual === 'geral' || nomeLocAtual === '' || (entMesmoControle.localId && s.localId !== entMesmoControle.localId)) {
-                    s.localId = entMesmoControle.localId;
-                    alterou = true;
+                if (!s.localId || nomeLocAtual === 'armazem geral' || nomeLocAtual === 'geral' || nomeLocAtual === '') {
+                    if (entMesmoControle.localId) {
+                        s.localId = entMesmoControle.localId;
+                        alterou = true;
+                    }
                 }
             }
         });
@@ -1247,87 +1254,135 @@ function mostrarPagina(nome) {
     }
 }
 
+function gerarChaveEstoque(controleId, produtoId, localId, glebaId, variedadeId) {
+    return `${controleId || 0}_${produtoId || 0}_${localId || 0}_${glebaId || 0}_${variedadeId || 0}`;
+}
+
 function obterSaldosAtuais() {
     let saldos = {};
-    cadastros.entrada.forEach(ent => {
-        let chave = `${ent.localId || 0}_${ent.produtoId || 0}_${ent.controleId}`;
+    (cadastros.entrada || []).forEach(ent => {
+        let chave = gerarChaveEstoque(ent.controleId, ent.produtoId, ent.localId, ent.glebaId, ent.variedadeId);
         if (!saldos[chave]) {
             saldos[chave] = { 
+                chave: chave,
                 localId: ent.localId, 
                 produtoId: ent.produtoId, 
                 controleId: ent.controleId, 
                 glebaId: ent.glebaId, 
                 variedadeId: ent.variedadeId,
-                glebasSet: new Set(),
-                variedadesSet: new Set(),
                 caixas: 0, 
                 contentores: 0, 
                 sacos: 0 
             };
         }
-        if (ent.glebaId) saldos[chave].glebasSet.add(ent.glebaId);
-        if (ent.variedadeId) saldos[chave].variedadesSet.add(ent.variedadeId);
-        if (ent.embalagem === 'Caixa') saldos[chave].caixas += parseInt(ent.qtd || 0);
-        else if (ent.embalagem === 'Contentor') saldos[chave].contentores += parseInt(ent.qtd || 0);
-        else if (ent.embalagem === 'Saco') saldos[chave].sacos += parseInt(ent.qtd || 0);
+        let qtd = parseInt(ent.qtd || 0);
+        if (ent.embalagem === 'Caixa') saldos[chave].caixas += qtd;
+        else if (ent.embalagem === 'Contentor') saldos[chave].contentores += qtd;
+        else saldos[chave].sacos += qtd;
     });
     
-    cadastros.saida.forEach(sai => {
-        let chave = `${sai.localId || 0}_${sai.produtoId || 0}_${sai.controleId}`;
+    (cadastros.saida || []).forEach(sai => {
+        let chave = gerarChaveEstoque(sai.controleId, sai.produtoId, sai.localId, sai.glebaId, sai.variedadeId);
+        
+        // Se a chave exata não existir (ex: saída de lote onde gleba/variedade/local veio sem seleção), localiza o item do estoque
         if (!saldos[chave]) {
+            // 1. Mesmo controle, produto e local com saldo ativo
             let chaveCompativel = Object.keys(saldos).find(k => {
                 let s = saldos[k];
-                return s.controleId === sai.controleId && s.produtoId === sai.produtoId;
+                return s.controleId === sai.controleId && 
+                       s.produtoId === sai.produtoId && 
+                       s.localId === sai.localId &&
+                       ((sai.embalagem === 'Caixa' && s.caixas > 0) || 
+                        (sai.embalagem === 'Contentor' && s.contentores > 0) || 
+                        (sai.embalagem !== 'Caixa' && sai.embalagem !== 'Contentor' && s.sacos > 0));
             });
+            // 2. Mesmo controle e produto com saldo ativo
+            if (!chaveCompativel) {
+                chaveCompativel = Object.keys(saldos).find(k => {
+                    let s = saldos[k];
+                    return s.controleId === sai.controleId && 
+                           s.produtoId === sai.produtoId &&
+                           ((sai.embalagem === 'Caixa' && s.caixas > 0) || 
+                            (sai.embalagem === 'Contentor' && s.contentores > 0) || 
+                            (sai.embalagem !== 'Caixa' && sai.embalagem !== 'Contentor' && s.sacos > 0));
+                });
+            }
+            // 3. Qualquer item com mesmo controle e produto
+            if (!chaveCompativel) {
+                chaveCompativel = Object.keys(saldos).find(k => {
+                    let s = saldos[k];
+                    return s.controleId === sai.controleId && s.produtoId === sai.produtoId;
+                });
+            }
+
             if (chaveCompativel) {
                 chave = chaveCompativel;
             } else {
                 saldos[chave] = { 
+                    chave: chave,
                     localId: sai.localId, 
                     produtoId: sai.produtoId, 
                     controleId: sai.controleId, 
                     glebaId: sai.glebaId, 
                     variedadeId: sai.variedadeId,
-                    glebasSet: new Set(),
-                    variedadesSet: new Set(),
                     caixas: 0, 
                     contentores: 0, 
                     sacos: 0 
                 };
             }
         }
-        if (sai.glebaId) saldos[chave].glebasSet.add(sai.glebaId);
-        if (sai.variedadeId) saldos[chave].variedadesSet.add(sai.variedadeId);
-        if (sai.embalagem === 'Caixa') saldos[chave].caixas -= parseInt(sai.qtd || 0);
-        else if (sai.embalagem === 'Contentor') saldos[chave].contentores -= parseInt(sai.qtd || 0);
-        else if (sai.embalagem === 'Saco') saldos[chave].sacos -= parseInt(sai.qtd || 0);
+
+        let qtd = parseInt(sai.qtd || 0);
+        if (sai.embalagem === 'Caixa') saldos[chave].caixas -= qtd;
+        else if (sai.embalagem === 'Contentor') saldos[chave].contentores -= qtd;
+        else saldos[chave].sacos -= qtd;
     });
     return saldos;
 }
 
 function calcularBaixasEntradas() {
-    let totalSaidasPorLote = {};
-    (cadastros.saida || []).forEach(s => {
-        let chave = `${s.controleId}_${s.produtoId}_${s.embalagem || 'Saco'}`;
-        totalSaidasPorLote[chave] = (totalSaidasPorLote[chave] || 0) + parseInt(s.qtd || 0);
-    });
-
-    let saidasRestantes = { ...totalSaidasPorLote };
     let mapaEntradas = {};
+    let saidasRestantes = (cadastros.saida || []).map(s => ({ ...s, qtdRestante: parseInt(s.qtd || 0) }));
     let entradasOrdenadas = [...(cadastros.entrada || [])].sort((a, b) => (a.data || '').localeCompare(b.data || '') || (a.id - b.id));
 
     entradasOrdenadas.forEach(e => {
-        let chave = `${e.controleId}_${e.produtoId}_${e.embalagem || 'Saco'}`;
-        let disponivelParaAbater = saidasRestantes[chave] || 0;
-        let qtdEntrada = parseInt(e.qtd || 0);
-        let baixada = Math.min(qtdEntrada, disponivelParaAbater);
-        saidasRestantes[chave] = Math.max(0, disponivelParaAbater - baixada);
-        let saldo = Math.max(0, qtdEntrada - baixada);
+        let qtdOriginal = parseInt(e.qtd || 0);
+        let qtdBaixada = 0;
+        let embEnt = e.embalagem || 'Saco';
+
+        // 1. Abate saídas com correspondência EXATA de controle, produto, local, gleba, variedade e embalagem
+        saidasRestantes.forEach(s => {
+            if (s.qtdRestante > 0 && 
+                s.controleId === e.controleId && 
+                s.produtoId === e.produtoId && 
+                s.localId === e.localId && 
+                s.glebaId === e.glebaId && 
+                s.variedadeId === e.variedadeId && 
+                (s.embalagem || 'Saco') === embEnt) {
+                let abater = Math.min(qtdOriginal - qtdBaixada, s.qtdRestante);
+                qtdBaixada += abater;
+                s.qtdRestante -= abater;
+            }
+        });
+
+        // 2. Se ainda sobrou saldo na entrada e há saídas do mesmo controle, produto e embalagem
+        if (qtdBaixada < qtdOriginal) {
+            saidasRestantes.forEach(s => {
+                if (s.qtdRestante > 0 && 
+                    s.controleId === e.controleId && 
+                    s.produtoId === e.produtoId && 
+                    (s.embalagem || 'Saco') === embEnt) {
+                    let abater = Math.min(qtdOriginal - qtdBaixada, s.qtdRestante);
+                    qtdBaixada += abater;
+                    s.qtdRestante -= abater;
+                }
+            });
+        }
 
         mapaEntradas[e.id] = {
-            qtdOriginal: qtdEntrada,
-            qtdBaixada: baixada,
-            saldoRestante: saldo
+            qtdOriginal: qtdOriginal,
+            qtdBaixada: qtdBaixada,
+            saldoRestante: Math.max(0, qtdOriginal - qtdBaixada)
         };
     });
 
@@ -1470,15 +1525,68 @@ function carregarDadosBaseControle(tipo) {
 
     if (tipo === 'saida') {
         let saldos = obterSaldosAtuais();
+        let itensDoLote = Object.values(saldos).filter(s => s.controleId === id && (s.caixas > 0 || s.contentores > 0 || s.sacos > 0));
+
+        // Painel visual auxiliar de itens do estoque para este controle
+        let containerItensLote = document.getElementById('painelItensEstoqueLote');
+        if (containerItensLote) {
+            if (itensDoLote.length > 0) {
+                let linhasTbl = itensDoLote.map(item => {
+                    let p = cadastros.produto.find(x => x.id === item.produtoId);
+                    let l = cadastros.local.find(x => x.id === item.localId);
+                    let g = cadastros.gleba.find(x => x.id === item.glebaId);
+                    let v = cadastros.variedade.find(x => x.id === item.variedadeId);
+                    let saldosTxt = [];
+                    if (item.caixas > 0) saldosTxt.push(`${item.caixas} Cx`);
+                    if (item.contentores > 0) saldosTxt.push(`${item.contentores} Cont`);
+                    if (item.sacos > 0) saldosTxt.push(`${item.sacos} Sac`);
+                    let embPref = item.sacos > 0 ? 'Saco' : (item.caixas > 0 ? 'Caixa' : 'Contentor');
+                    return `<tr style="border-bottom: 1px solid #e2e8f0;">
+                        <td style="padding: 4px; font-weight: bold;">${p?.cod || '-'}</td>
+                        <td style="padding: 4px;">${limparNomeGalpao(l?.nome || '-')}</td>
+                        <td style="padding: 4px;">${limparNomeProduto(p?.nome || '-')}</td>
+                        <td style="padding: 4px;">${g ? g.nome.replace(/gleba/gi, '').trim() : '-'}</td>
+                        <td style="padding: 4px;">${v?.nome || '-'}</td>
+                        <td style="padding: 4px; font-weight: bold; color: #15803d;">${saldosTxt.join(' | ')}</td>
+                        <td style="padding: 4px; text-align: center;">
+                            <button type="button" class="btn" style="padding: 2px 7px; font-size: 10px; background: #15803d; color: white; border: none; border-radius: 3px; cursor: pointer;" onclick="preencherCamposSaidaItem(${item.produtoId}, ${item.localId || 0}, ${item.glebaId || 0}, ${item.variedadeId || 0}, '${embPref}')">Usar</button>
+                        </td>
+                    </tr>`;
+                }).join('');
+
+                containerItensLote.style.display = 'block';
+                containerItensLote.innerHTML = `
+                    <div style="font-size: 11px; font-weight: bold; color: #1e3a8a; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+                        <span>📋 Itens com saldo no Painel de Estoque para este Lote:</span>
+                        <span style="font-size: 10px; color: #64748b;">(Clique em 'Usar' para preencher)</span>
+                    </div>
+                    <div style="max-height: 140px; overflow-y: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+                            <thead>
+                                <tr style="background: #e2e8f0; color: #334155;">
+                                    <th style="padding: 3px; text-align: left;">Cód</th>
+                                    <th style="padding: 3px; text-align: left;">Local</th>
+                                    <th style="padding: 3px; text-align: left;">Produto</th>
+                                    <th style="padding: 3px; text-align: left;">Gleba</th>
+                                    <th style="padding: 3px; text-align: left;">Variedade</th>
+                                    <th style="padding: 3px; text-align: left;">Saldo</th>
+                                    <th style="padding: 3px; text-align: center;">Ação</th>
+                                </tr>
+                            </thead>
+                            <tbody>${linhasTbl}</tbody>
+                        </table>
+                    </div>`;
+            } else {
+                containerItensLote.style.display = 'block';
+                containerItensLote.innerHTML = '<div style="font-size: 11px; color: #b91c1c; font-weight: bold;">⚠️ Nenhum saldo ativo encontrado no Painel de Estoque para este controle.</div>';
+            }
+        }
+
         let produtosEstoque = new Set();
         let glebasEstoque = new Set();
-        Object.keys(saldos).forEach(k => {
-            let s = saldos[k];
-            if (s.controleId === id && (s.caixas > 0 || s.contentores > 0 || s.sacos > 0)) {
-                if (s.produtoId) produtosEstoque.add(s.produtoId);
-                if (s.glebaId) glebasEstoque.add(s.glebaId);
-                if (s.glebasSet) s.glebasSet.forEach(gId => glebasEstoque.add(gId));
-            }
+        itensDoLote.forEach(s => {
+            if (s.produtoId) produtosEstoque.add(s.produtoId);
+            if (s.glebaId) glebasEstoque.add(s.glebaId);
         });
 
         let glebasOpcoes = cadastros.gleba.filter(g => glebasIdsVinculadas.includes(g.id));
@@ -1519,6 +1627,45 @@ function carregarDadosBaseControle(tipo) {
     }
 }
 
+function preencherCamposSaidaItem(prodId, localId, glebaId, variedadeId, embalagem) {
+    const campoProd = document.getElementById('produtoSaida');
+    if (campoProd) {
+        campoProd.value = prodId;
+        atualizarFiltrosCruzadosSaida();
+    }
+    if (localId) {
+        const campoLoc = document.getElementById('localSaida');
+        if (campoLoc) campoLoc.value = localId;
+    }
+    if (glebaId) {
+        const campoGleba = document.getElementById('glebaSaida');
+        if (campoGleba) campoGleba.value = glebaId;
+    }
+    if (variedadeId) {
+        const campoVar = document.getElementById('variedadeSaida');
+        if (campoVar) campoVar.value = variedadeId;
+    }
+    if (embalagem) {
+        const campoEmb = document.getElementById('embalagemSaida');
+        if (campoEmb) campoEmb.value = embalagem;
+    }
+    atualizarExibicaoSaldoSaida();
+    const campoQtd = document.getElementById('qtdSaida');
+    if (campoQtd) {
+        campoQtd.focus();
+    }
+}
+
+function iniciarSaidaDireta(controleId, produtoId, localId, glebaId, variedadeId) {
+    mostrarPagina('saida');
+    const campoCtrl = document.getElementById('controleSaida');
+    if (campoCtrl) {
+        campoCtrl.value = controleId;
+        carregarDadosBaseControle('saida');
+    }
+    preencherCamposSaidaItem(produtoId, localId, glebaId, variedadeId);
+}
+
 function atualizarFiltrosCruzadosSaida() {
     const ctrlId = parseInt(document.getElementById('controleSaida').value);
     const prodId = parseInt(document.getElementById('produtoSaida').value);
@@ -1539,31 +1686,37 @@ function atualizarFiltrosCruzadosSaida() {
     let prodSelecionado = cadastros.produto.find(p => p.id === prodId);
     let culturaId = prodSelecionado ? prodSelecionado.culturaId : null;
     let saldos = obterSaldosAtuais();
+
+    let itensEstoqueProd = Object.values(saldos).filter(s => s.controleId === ctrlId && s.produtoId === prodId && (s.caixas > 0 || s.contentores > 0 || s.sacos > 0));
+
     let locaisComEstoque = new Set();
+    let glebasComEstoque = new Set();
+    let variedadesComEstoque = new Set();
     let temCaixa = false, temContentor = false, temSaco = false;
     let totalCaixas = 0, totalContentores = 0, totalSacos = 0;
-    let loteGlebaId = null, loteVariedadeId = null, loteLocalId = null;
 
-    let entDoLote = (cadastros.entrada || []).find(e => e.controleId === ctrlId && e.produtoId === prodId)
-                 || (cadastros.entrada || []).find(e => e.controleId === ctrlId);
-
-    if (entDoLote) {
-        loteGlebaId = entDoLote.glebaId;
-        loteVariedadeId = entDoLote.variedadeId;
-        loteLocalId = entDoLote.localId;
-    }
-
-    Object.keys(saldos).forEach(k => {
-        let s = saldos[k];
-        if (s.controleId === ctrlId && s.produtoId === prodId) {
-            if (s.caixas > 0) { temCaixa = true; totalCaixas += s.caixas; locaisComEstoque.add(s.localId); }
-            if (s.contentores > 0) { temContentor = true; totalContentores += s.contentores; locaisComEstoque.add(s.localId); }
-            if (s.sacos > 0) { temSaco = true; totalSacos += s.sacos; locaisComEstoque.add(s.localId); }
-            if (s.glebaId) loteGlebaId = s.glebaId;
-            if (s.variedadeId) loteVariedadeId = s.variedadeId;
-            if (s.localId) loteLocalId = s.localId;
-        }
+    itensEstoqueProd.forEach(s => {
+        if (s.localId) locaisComEstoque.add(s.localId);
+        if (s.glebaId) glebasComEstoque.add(s.glebaId);
+        if (s.variedadeId) variedadesComEstoque.add(s.variedadeId);
+        if (s.caixas > 0) { temCaixa = true; totalCaixas += s.caixas; }
+        if (s.contentores > 0) { temContentor = true; totalContentores += s.contentores; }
+        if (s.sacos > 0) { temSaco = true; totalSacos += s.sacos; }
     });
+
+    let loteGlebaId = glebasComEstoque.size > 0 ? Array.from(glebasComEstoque)[0] : null;
+    let loteVariedadeId = variedadesComEstoque.size > 0 ? Array.from(variedadesComEstoque)[0] : null;
+    let loteLocalId = locaisComEstoque.size > 0 ? Array.from(locaisComEstoque)[0] : null;
+
+    if (!loteGlebaId || !loteVariedadeId || !loteLocalId) {
+        let entDoLote = (cadastros.entrada || []).find(e => e.controleId === ctrlId && e.produtoId === prodId)
+                     || (cadastros.entrada || []).find(e => e.controleId === ctrlId);
+        if (entDoLote) {
+            if (!loteGlebaId) loteGlebaId = entDoLote.glebaId;
+            if (!loteVariedadeId) loteVariedadeId = entDoLote.variedadeId;
+            if (!loteLocalId) loteLocalId = entDoLote.localId;
+        }
+    }
 
     if (campoGleba && loteGlebaId && (!campoGleba.value || campoGleba.value === '')) {
         campoGleba.value = loteGlebaId;
@@ -1596,10 +1749,10 @@ function atualizarFiltrosCruzadosSaida() {
 
     if (embalagensDisponiveis.length === 1) {
         campoEmbalagem.value = embalagensDisponiveis[0];
-    } else if (entDoLote && embalagensDisponiveis.includes(entDoLote.embalagem)) {
-        campoEmbalagem.value = entDoLote.embalagem;
     } else if (temSaco) {
         campoEmbalagem.value = 'Saco';
+    } else if (embalagensDisponiveis.length > 0) {
+        campoEmbalagem.value = embalagensDisponiveis[0];
     }
 
     atualizarExibicaoSaldoSaida();
@@ -1610,6 +1763,8 @@ function atualizarExibicaoSaldoSaida() {
     const prodId = parseInt(document.getElementById('produtoSaida')?.value);
     const embalagem = document.getElementById('embalagemSaida')?.value;
     const localId = parseInt(document.getElementById('localSaida')?.value) || 0;
+    const glebaId = parseInt(document.getElementById('glebaSaida')?.value) || 0;
+    const variedadeId = parseInt(document.getElementById('variedadeSaida')?.value) || 0;
     const campoQtd = document.getElementById('qtdSaida');
     let infoBox = document.getElementById('infoSaldoDisponivelSaida');
 
@@ -1627,10 +1782,17 @@ function atualizarExibicaoSaldoSaida() {
     }
 
     let saldos = obterSaldosAtuais();
-    let apiKey = `${localId}_${prodId}_${ctrlId}`;
-    let itemSaldo = saldos[apiKey];
+    let chaveExata = gerarChaveEstoque(ctrlId, prodId, localId, glebaId, variedadeId);
+    let itemSaldo = saldos[chaveExata];
+
     if (!itemSaldo) {
-        let compKey = Object.keys(saldos).find(k => saldos[k].controleId === ctrlId && saldos[k].produtoId === prodId);
+        let compKey = Object.keys(saldos).find(k => {
+            let s = saldos[k];
+            return s.controleId === ctrlId && s.produtoId === prodId && s.localId === localId;
+        });
+        if (!compKey) {
+            compKey = Object.keys(saldos).find(k => saldos[k].controleId === ctrlId && saldos[k].produtoId === prodId);
+        }
         if (compKey) itemSaldo = saldos[compKey];
     }
 
@@ -1648,20 +1810,27 @@ function atualizarExibicaoSaldoSaida() {
     infoBox.style.margin = '8px 0 10px 0';
     infoBox.style.padding = '10px 14px';
     infoBox.style.borderRadius = '6px';
-    infoBox.style.fontSize = '13px';
-    infoBox.style.fontWeight = 'bold';
+    infoBox.style.fontSize = '12px';
+
+    let prodObj = cadastros.produto.find(p => p.id === prodId);
+    let localObj = cadastros.local.find(l => l.id === localId);
+    let varObj = cadastros.variedade.find(v => v.id === variedadeId);
+    let glebaObj = cadastros.gleba.find(g => g.id === glebaId);
+    let ctrlObj = cadastros.controle.find(c => c.id === ctrlId);
+
+    let descItem = `<strong>Item verificado no Painel de Estoque:</strong> Cód: ${prodObj?.cod || '-'} | Local: ${limparNomeGalpao(localObj?.nome || '-')} | Variedade: ${varObj?.nome || '-'} | Gleba: ${glebaObj?.nome || '-'} | Controle: ${ctrlObj?.cod || '-'}`;
 
     if (saldoDisp <= 0) {
         infoBox.style.background = '#fef2f2';
         infoBox.style.border = '1px solid #fecaca';
         infoBox.style.color = '#991b1b';
-        infoBox.innerHTML = `⚠️ <strong>Atenção:</strong> Este lote não possui saldo ativo em estoque de ${embalagem} para dar baixa.`;
+        infoBox.innerHTML = `⚠️ <strong>Atenção:</strong> Não há saldo disponível para este item no Painel de Estoque (${embalagem}).<br><span style="font-size: 11px; color: #475569;">${descItem}</span>`;
     } else {
         infoBox.style.background = '#f0fdf4';
         infoBox.style.border = '1px solid #bbf7d0';
         infoBox.style.color = '#166534';
-        let textoApos = qtdDigitada > 0 ? ` &bull; Saldo restante após baixa: <strong style="color: #15803d;">${saldoApos} ${embalagem}</strong>` : '';
-        infoBox.innerHTML = `📦 Saldo disponível para baixa: <span style="font-size: 15px; color: #15803d;">${saldoDisp} ${embalagem}(s)</span>${textoApos}`;
+        let textoApos = qtdDigitada > 0 ? ` &bull; Saldo restante após baixa: <strong style="color: ${saldoApos === 0 ? '#b91c1c' : '#15803d'}; font-size: 14px;">${saldoApos} ${embalagem}</strong>` : '';
+        infoBox.innerHTML = `📦 <strong>Saldo disponível no Painel de Estoque:</strong> <span style="font-size: 15px; color: #15803d; font-weight: bold;">${saldoDisp} ${embalagem}(s)</span>${textoApos}<br><span style="font-size: 11px; color: #334155;">${descItem}</span>`;
     }
 
     if (campoQtd && saldoDisp > 0) {
@@ -1670,64 +1839,13 @@ function atualizarExibicaoSaldoSaida() {
 }
 
 function atualizarResumoEstoque() {
-    let saldos = {};
+    let container = document.getElementById('containerResumoEstoque') || document.getElementById('painelEstoqueSankhya');
+    if (!container) return;
+
     const filtroEl = document.getElementById('filtroGeral');
     const termoPesquisa = filtroEl ? filtroEl.value.toLowerCase().trim() : '';
 
-    cadastros.entrada.forEach(ent => {
-        let chave = `${ent.localId || 0}_${ent.produtoId || 0}_${ent.controleId}`;
-        if (!saldos[chave]) {
-            saldos[chave] = { 
-                localId: ent.localId, 
-                produtoId: ent.produtoId, 
-                controleId: ent.controleId, 
-                glebaId: ent.glebaId,
-                glebasSet: new Set(), 
-                variedadesSet: new Set(), 
-                caixas: 0, 
-                contentores: 0, 
-                sacos: 0 
-            };
-        }
-        if(ent.glebaId) saldos[chave].glebasSet.add(ent.glebaId);
-        if(ent.variedadeId) saldos[chave].variedadesSet.add(ent.variedadeId);
-        if (ent.embalagem === 'Caixa') saldos[chave].caixas += parseInt(ent.qtd || 0);
-        else if (ent.embalagem === 'Contentor') saldos[chave].contentores += parseInt(ent.qtd || 0);
-        else if (ent.embalagem === 'Saco') saldos[chave].sacos += parseInt(ent.qtd || 0);
-    });
-    
-    cadastros.saida.forEach(sai => {
-        let chave = `${sai.localId || 0}_${sai.produtoId || 0}_${sai.controleId}`;
-        if (!saldos[chave]) {
-            let chaveCompativel = Object.keys(saldos).find(k => {
-                let s = saldos[k];
-                return s.controleId === sai.controleId && s.produtoId === sai.produtoId;
-            });
-            if (chaveCompativel) {
-                chave = chaveCompativel;
-            } else {
-                saldos[chave] = { 
-                    localId: sai.localId, 
-                    produtoId: sai.produtoId, 
-                    controleId: sai.controleId, 
-                    glebaId: sai.glebaId,
-                    glebasSet: new Set(), 
-                    variedadesSet: new Set(), 
-                    caixas: 0, 
-                    contentores: 0, 
-                    sacos: 0 
-                };
-            }
-        }
-        if(sai.glebaId) saldos[chave].glebasSet.add(sai.glebaId);
-        if(sai.variedadeId) saldos[chave].variedadesSet.add(sai.variedadeId);
-        if (sai.embalagem === 'Caixa') saldos[chave].caixas -= parseInt(sai.qtd || 0);
-        else if (sai.embalagem === 'Contentor') saldos[chave].contentores -= parseInt(sai.qtd || 0);
-        else if (sai.embalagem === 'Saco') saldos[chave].sacos -= parseInt(sai.qtd || 0);
-    });
-
-    let container = document.getElementById('containerResumoEstoque');
-    if(!container) return;
+    let saldos = obterSaldosAtuais();
     
     let gruposPorControle = {};
     Object.keys(saldos).forEach(k => {
@@ -1740,7 +1858,10 @@ function atualizarResumoEstoque() {
     });
 
     let listaControles = Object.keys(gruposPorControle);
-    if (listaControles.length === 0) { container.innerHTML = '<p class="vazio">Nenhum saldo ativo para exibir.</p>'; return; }
+    if (listaControles.length === 0) { 
+        container.innerHTML = '<p class="vazio">Nenhum saldo ativo para exibir.</p>'; 
+        return; 
+    }
 
     let htmlGeral = '', encontrouAlgumRegistro = false;
     const coresCabecalho = [
@@ -1771,32 +1892,21 @@ function atualizarResumoEstoque() {
             let localNome = limparNomeGalpao(cadastros.local.find(x => x.id === item.localId)?.nome || '-'); 
             let produtoNomeLimpo = limparNomeProduto(prodObj?.nome || '-');
 
-            let listaVars = Array.from(item.variedadesSet).map(id => cadastros.variedade.find(v => v.id === id)?.nome).filter(Boolean);
-            let varsReais = listaVars.filter(n => normalizarTexto(n) !== 'padrao');
-            let txtVariedade = (varsReais.length > 0 ? varsReais : listaVars).join(', ') || '-';
+            let varObj = cadastros.variedade.find(v => v.id === item.variedadeId);
+            let txtVariedade = varObj ? varObj.nome : '-';
 
             let fazendaNome = cadastros.fazenda.find(x => x.id === ctrlObj?.fazendaId)?.nome || '-';
             let pivoNome = limparNomePivo(cadastros.pivo.find(x => x.id === ctrlObj?.pivoId)?.nome || '');
             
-            // Exibir a gleba real associada ao lote / movimentação
-            let listaGlebas = Array.from(item.glebasSet).map(id => cadastros.gleba.find(g => g.id === id)?.nome).filter(Boolean);
-            if (listaGlebas.length === 0 && item.glebaId) {
-                let gObj = cadastros.gleba.find(g => g.id === item.glebaId);
-                if (gObj) listaGlebas.push(gObj.nome);
+            let glebaObj = cadastros.gleba.find(g => g.id === item.glebaId);
+            let txtGleba = glebaObj ? glebaObj.nome.replace(/gleba/gi, '').replace(/\s+/g, ' ').trim() : '';
+            if (!txtGleba && ctrlObj?.glebasIds && ctrlObj.glebasIds.length > 0) {
+                let glebasDoCtrl = ctrlObj.glebasIds.map(gid => cadastros.gleba.find(g => g.id === gid)?.nome).filter(Boolean);
+                txtGleba = glebasDoCtrl.map(g => g.replace(/gleba/gi, '').replace(/\s+/g, ' ').trim()).join(', ');
             }
-            if (listaGlebas.length === 0 && ctrlObj?.glebasIds && ctrlObj.glebasIds.length > 0) {
-                ctrlObj.glebasIds.forEach(gid => {
-                    let gObj = cadastros.gleba.find(g => g.id === gid);
-                    if (gObj) listaGlebas.push(gObj.nome);
-                });
-            }
-            let glebasReais = listaGlebas.filter(n => !/^(1|gleba\s*1)$/i.test(normalizarTexto(n)));
-            let txtGleba = (glebasReais.length > 0 ? glebasReais : listaGlebas)
-                .map(g => g.replace(/gleba/gi, '').replace(/\s+/g, ' ').trim())
-                .filter(Boolean)
-                .join(', ') || '-';
-            let localidadeCombinada = pivoNome ? `${fazendaNome} ${pivoNome} / ${txtGleba}` : `${fazendaNome} / ${txtGleba}`;
+            if (!txtGleba) txtGleba = '-';
 
+            let localidadeCombinada = pivoNome ? `${fazendaNome} ${pivoNome} / ${txtGleba}` : `${fazendaNome} / ${txtGleba}`;
             let identificacaoControle = ctrlObj?.identificacao ? ctrlObj.identificacao.trim() : '';
 
             let codExibicao = prodObj?.cod || '';
@@ -1834,7 +1944,9 @@ function atualizarResumoEstoque() {
                     ? `<strong>${f.controleCodigo}</strong><br><span style="font-size: 11px; color: #475569; font-weight: normal;">${f.identificacaoControle}</span>` 
                     : `<strong>${f.controleCodigo}</strong>`;
 
-                htmlTabelaCorpo += `<tr><td><strong>${f.cod}</strong></td><td>${f.localNome}</td><td><strong>${f.produtoNomeLimpo}</strong></td><td>${f.localidadeCombinada}</td><td>${f.txtVariedade}</td><td>${textoControleExibir}</td>${tdsEmbalagem}</tr>`;
+                let btnBaixa = `<td style="text-align: center;"><button type="button" class="btn" style="padding: 2px 7px; font-size: 11px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;" onclick="iniciarSaidaDireta(${f.item.controleId}, ${f.item.produtoId}, ${f.item.localId || 0}, ${f.item.glebaId || 0}, ${f.item.variedadeId || 0})" title="Lançar saída / baixa deste item do estoque">📤 Baixar</button></td>`;
+
+                htmlTabelaCorpo += `<tr><td><strong>${f.cod}</strong></td><td>${f.localNome}</td><td><strong>${f.produtoNomeLimpo}</strong></td><td>${f.localidadeCombinada}</td><td>${f.txtVariedade}</td><td>${textoControleExibir}</td>${tdsEmbalagem}${btnBaixa}</tr>`;
             });
 
             let textoSafra = '2025/26'; 
@@ -1848,7 +1960,7 @@ function atualizarResumoEstoque() {
             htmlGeral += `
                 <div style="margin-top: 10px; margin-bottom: 8px;">
                     <div class="titulo-sankhya" style="background-color: ${corAtual.bg}; color: white; border: 1px solid ${corAtual.border}; text-align: left; padding-left: 8px; font-weight: bold; font-size: 11px; border-radius: 4px 4px 0 0;">CONTROLE DE ESTOQUE ${nomeCulturaEncontrada} - SAFRA - ${textoSafra}</div>
-                    <div class="tabela-wrapper"><table class="tabela"><thead><tr><th style="background: ${corAtual.th}; border: 1px solid ${corAtual.thBorder}; color: white;">Cód</th><th style="background: ${corAtual.th}; border: 1px solid ${corAtual.thBorder}; color: white;">Local</th><th style="background: ${corAtual.th}; border: 1px solid ${corAtual.thBorder}; color: white;">Produto</th><th style="background: ${corAtual.th}; border: 1px solid ${corAtual.thBorder}; color: white;">Fazenda / Glebas</th><th style="background: ${corAtual.th}; border: 1px solid ${corAtual.thBorder}; color: white;">Variedades</th><th style="background: ${corAtual.th}; border: 1px solid ${corAtual.thBorder}; color: white;">Controle</th>${thsEmbalagem}</tr></thead><tbody>${htmlTabelaCorpo}</tbody></table></div>
+                    <div class="tabela-wrapper"><table class="tabela"><thead><tr><th style="background: ${corAtual.th}; border: 1px solid ${corAtual.thBorder}; color: white;">Cód</th><th style="background: ${corAtual.th}; border: 1px solid ${corAtual.thBorder}; color: white;">Local</th><th style="background: ${corAtual.th}; border: 1px solid ${corAtual.thBorder}; color: white;">Produto</th><th style="background: ${corAtual.th}; border: 1px solid ${corAtual.thBorder}; color: white;">Fazenda / Glebas</th><th style="background: ${corAtual.th}; border: 1px solid ${corAtual.thBorder}; color: white;">Variedades</th><th style="background: ${corAtual.th}; border: 1px solid ${corAtual.thBorder}; color: white;">Controle</th>${thsEmbalagem}<th style="background: ${corAtual.th}; border: 1px solid ${corAtual.thBorder}; color: white; text-align: center; width: 65px;">Ação</th></tr></thead><tbody>${htmlTabelaCorpo}</tbody></table></div>
                 </div>`;
         }
     });
@@ -2233,10 +2345,18 @@ function salvarSaida() {
     };
 
     let saldos = obterSaldosAtuais();
-    let apiKey = `${obj.localId}_${obj.produtoId}_${obj.controleId}`;
-    let itemSaldo = saldos[apiKey];
+    let chaveExata = gerarChaveEstoque(obj.controleId, obj.produtoId, obj.localId, obj.glebaId, obj.variedadeId);
+    let itemSaldo = saldos[chaveExata];
     if (!itemSaldo) {
-        let compKey = Object.keys(saldos).find(k => saldos[k].controleId === obj.controleId && saldos[k].produtoId === obj.produtoId);
+        let compKey = Object.keys(saldos).find(k => {
+            let s = saldos[k];
+            return s.controleId === obj.controleId && 
+                   s.produtoId === obj.produtoId && 
+                   s.localId === obj.localId;
+        });
+        if (!compKey) {
+            compKey = Object.keys(saldos).find(k => saldos[k].controleId === obj.controleId && saldos[k].produtoId === obj.produtoId);
+        }
         if (compKey) itemSaldo = saldos[compKey];
     }
 
@@ -2254,8 +2374,8 @@ function salvarSaida() {
         }
     }
 
-    if (obj.qtd > saldoDisponivel && !usuarioLogado.podeFurarEstoque) {
-        return mostrarMsg(`Saldo insuficiente na entrada! Saldo disponível: ${saldoDisponivel} (${obj.embalagem})`, 'erro', 'msgSaida');
+    if (obj.qtd > saldoDisponivel && !usuarioLogado?.podeFurarEstoque) {
+        return mostrarMsg(`Saldo insuficiente no Painel de Estoque! Saldo disponível: ${saldoDisponivel} (${obj.embalagem})`, 'erro', 'msgSaida');
     }
 
     if (id) { 
@@ -2268,7 +2388,7 @@ function salvarSaida() {
     salvarDados(); 
     cancelarEdicao('saida'); 
     let novoSaldo = Math.max(0, saldoDisponivel - obj.qtd);
-    mostrarMsg(`✅ Saída de ${obj.qtd} (${obj.embalagem}) lançada com sucesso! Baixa efetuada na entrada (Saldo restante: ${novoSaldo}).`, 'sucesso', 'msgSaida'); 
+    mostrarMsg(`✅ Saída de ${obj.qtd} (${obj.embalagem}) lançada com sucesso! Baixa efetuada no Painel de Estoque (Saldo restante: ${novoSaldo}).`, 'sucesso', 'msgSaida'); 
     atualizarResumoEstoque(); 
     renderizarListaSaidaEmbutida();
     renderizarListaEntradaEmbutida();
