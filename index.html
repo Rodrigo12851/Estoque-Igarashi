@@ -353,10 +353,8 @@
 
 <div id="pagina-inicial" class="pagina ativa">
     <div class="card">
-        <div class="container-exportacao" style="display: flex; align-items: center; gap: 6px;">
-            <button class="btn-excel-top" onclick="abrirModalImportacao('entrada')" title="Central de Importação de Planilhas Excel (.xlsx) ou CSV">📥 Importar</button>
-            <button class="btn-export-top" onclick="exportarEstoqueExcel()" title="Exportar Saldo de Estoque para Excel">📤 Exportar</button>
-            <button class="btn-hamburguer" onclick="alternarMenuExportarInicial(event)" title="Mais opções (PDF, Modelos, etc.)">☰</button>
+        <div class="container-exportacao">
+            <button class="btn-hamburguer" onclick="alternarMenuExportarInicial(event)" title="Mais opções (Exportar, PDF, Modelos, etc.)">☰</button>
             <div id="menuExportarInicial" class="menu-exportar">
                 <div class="item-exportar" onclick="exportarEstoqueExcel()">
                     <div class="mini-planilha">
