@@ -1,0 +1,6 @@
+{
+  "name": "Controle de Estoque Agrícola Inteligente",
+  "description": "Controle de estoque agrícola inteligente com assistente IA, controle de safras, entradas, saídas, cadastros, relatórios e importação de planilhas Excel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
