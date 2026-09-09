@@ -349,7 +349,14 @@
     </style>
 </head>
 <body>
-<header><h1>CONTROLE DE ESTOQUE</h1></header>
+<header style="display: flex; justify-content: space-between; align-items: center; padding: 6px 14px; flex-wrap: wrap; gap: 8px;">
+    <h1>CONTROLE DE ESTOQUE</h1>
+    <div id="statusBancoNuvem" style="font-size: 11px; font-weight: 500; background: rgba(255,255,255,0.18); padding: 4px 10px; border-radius: 14px; display: inline-flex; align-items: center; gap: 6px; user-select: none;">
+        <span id="iconeStatusNuvem" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 6px #f59e0b;"></span>
+        <span id="textoStatusNuvem">☁️ Conectando ao Banco...</span>
+        <button type="button" onclick="sincronizarBancoManual()" title="Sincronizar agora com o Banco na Nuvem" style="background: rgba(255,255,255,0.25); border: none; color: white; cursor: pointer; font-size: 11px; margin-left: 4px; padding: 2px 6px; border-radius: 4px; line-height: 1;">🔄 Sincronizar</button>
+    </div>
+</header>
 
 <div id="pagina-inicial" class="pagina ativa">
     <div class="card">
@@ -1004,6 +1011,7 @@ document.addEventListener("DOMContentLoaded", function() {
     });
 
     inicializarEventosImportacao();
+    carregarBancoDeDadosFirebase();
 });
 
 function alternarMenuExportar() {
@@ -2469,6 +2477,9 @@ function excluirEntrada(id) {
     }
     if (!confirm('Deseja realmente excluir esta entrada de estoque?')) return; 
     cadastros.entrada = cadastros.entrada.filter(l => l.id != id); 
+    if (window.firebaseEstoque && typeof window.firebaseEstoque.excluirEntradaNoBanco === 'function') {
+        window.firebaseEstoque.excluirEntradaNoBanco(id);
+    }
     salvarDados(); 
     const abaDetalhes = document.getElementById('abaDetalhes');
     if (abaDetalhes && abaDetalhes.style.display === 'flex') {
@@ -2488,6 +2499,9 @@ function excluirSaida(id) {
     }
     if (!confirm('Deseja realmente excluir esta saída de estoque? O saldo correspondente será estornado na entrada.')) return; 
     cadastros.saida = cadastros.saida.filter(l => l.id != id); 
+    if (window.firebaseEstoque && typeof window.firebaseEstoque.excluirSaidaNoBanco === 'function') {
+        window.firebaseEstoque.excluirSaidaNoBanco(id);
+    }
     salvarDados(); 
     const abaDetalhes = document.getElementById('abaDetalhes');
     if (abaDetalhes && abaDetalhes.style.display === 'flex') {
@@ -2869,7 +2883,62 @@ function mostrarMsg(texto, tipo, idElemento) {
     setTimeout(() => el.style.display = 'none', 3000);
 }
 
-function salvarDados() {
+let timerSyncNuvem = null;
+
+function atualizarStatusNuvem(estado, detalhe) {
+    const elTexto = document.getElementById('textoStatusNuvem');
+    const elIcone = document.getElementById('iconeStatusNuvem');
+    if (!elTexto || !elIcone) return;
+
+    if (estado === 'conectando') {
+        elIcone.style.background = '#f59e0b';
+        elIcone.style.boxShadow = '0 0 6px #f59e0b';
+        elTexto.textContent = '☁️ Conectando ao Banco...';
+    } else if (estado === 'carregando') {
+        elIcone.style.background = '#38bdf8';
+        elIcone.style.boxShadow = '0 0 6px #38bdf8';
+        elTexto.textContent = '☁️ Baixando dados do Banco...';
+    } else if (estado === 'salvando') {
+        elIcone.style.background = '#38bdf8';
+        elIcone.style.boxShadow = '0 0 6px #38bdf8';
+        elTexto.textContent = detalhe || '☁️ Gravando no Banco...';
+    } else if (estado === 'salvo') {
+        elIcone.style.background = '#22c55e';
+        elIcone.style.boxShadow = '0 0 6px #22c55e';
+        const hora = new Date().toLocaleTimeString('pt-BR');
+        elTexto.textContent = `☁️ Salvo no Banco (${hora})`;
+    } else if (estado === 'conectado') {
+        elIcone.style.background = '#22c55e';
+        elIcone.style.boxShadow = '0 0 6px #22c55e';
+        elTexto.textContent = `☁️ Banco Conectado ${detalhe ? '· ' + detalhe : ''}`;
+    } else if (estado === 'offline') {
+        elIcone.style.background = '#94a3b8';
+        elIcone.style.boxShadow = 'none';
+        elTexto.textContent = '☁️ Banco Offline (Cache Local)';
+    } else if (estado === 'erro') {
+        elIcone.style.background = '#ef4444';
+        elIcone.style.boxShadow = '0 0 6px #ef4444';
+        elTexto.textContent = detalhe || '☁️ Erro de Sincronização';
+    }
+}
+
+async function sincronizarComBancoNuvem() {
+    if (!window.firebaseEstoque) return;
+    try {
+        atualizarStatusNuvem('salvando');
+        await Promise.all([
+            window.firebaseEstoque.salvarCadastrosNoBanco(cadastros),
+            window.firebaseEstoque.salvarEntradasNoBanco(cadastros.entrada),
+            window.firebaseEstoque.salvarSaidasNoBanco(cadastros.saida)
+        ]);
+        atualizarStatusNuvem('salvo');
+    } catch (err) {
+        console.error("Erro ao sincronizar com banco:", err);
+        atualizarStatusNuvem('erro');
+    }
+}
+
+function salvarDados(pularNuvem = false) {
     localStorage.setItem('cadastros', JSON.stringify({ 
         cultura: cadastros.cultura, 
         variedade: cadastros.variedade, 
@@ -2879,14 +2948,102 @@ function salvarDados() {
         gleba: cadastros.gleba, 
         pivo: cadastros.pivo, 
         controle: cadastros.controle,
-        usuario: cadastros.usuario // Adicionado aqui
+        usuario: cadastros.usuario
     }));
     localStorage.setItem('entrada', JSON.stringify(cadastros.entrada));
     localStorage.setItem('saida', JSON.stringify(cadastros.saida));
     if (typeof usuarioLogado !== 'undefined') {
         localStorage.setItem('usuarioLogado', JSON.stringify(usuarioLogado));
     }
+
+    if (!pularNuvem && window.firebaseEstoque) {
+        if (timerSyncNuvem) clearTimeout(timerSyncNuvem);
+        timerSyncNuvem = setTimeout(sincronizarComBancoNuvem, 600);
+    }
 }
+
+async function carregarBancoDeDadosFirebase() {
+    if (!window.firebaseEstoque) {
+        setTimeout(carregarBancoDeDadosFirebase, 250);
+        return;
+    }
+    atualizarStatusNuvem('carregando');
+    try {
+        const dadosBanco = await window.firebaseEstoque.carregarTudoDoBanco();
+        let temDadosNoBanco = false;
+
+        if (dadosBanco.cadastros && Object.keys(dadosBanco.cadastros).length > 0) {
+            temDadosNoBanco = true;
+        }
+        if (dadosBanco.entradas && dadosBanco.entradas.length > 0) {
+            temDadosNoBanco = true;
+        }
+        if (dadosBanco.saidas && dadosBanco.saidas.length > 0) {
+            temDadosNoBanco = true;
+        }
+
+        if (temDadosNoBanco) {
+            if (dadosBanco.cadastros) {
+                const c = dadosBanco.cadastros;
+                if (c.cultura && c.cultura.length > 0) cadastros.cultura = c.cultura;
+                if (c.variedade && c.variedade.length > 0) cadastros.variedade = c.variedade;
+                if (c.produto && c.produto.length > 0) cadastros.produto = c.produto;
+                if (c.local && c.local.length > 0) cadastros.local = c.local;
+                if (c.fazenda && c.fazenda.length > 0) cadastros.fazenda = c.fazenda;
+                if (c.gleba && c.gleba.length > 0) cadastros.gleba = c.gleba;
+                if (c.pivo && c.pivo.length > 0) cadastros.pivo = c.pivo;
+                if (c.controle && c.controle.length > 0) cadastros.controle = c.controle;
+                if (c.usuario && c.usuario.length > 0) cadastros.usuario = c.usuario;
+            }
+            if (dadosBanco.entradas && dadosBanco.entradas.length > 0) {
+                cadastros.entrada = dadosBanco.entradas;
+            }
+            if (dadosBanco.saidas && dadosBanco.saidas.length > 0) {
+                cadastros.saida = dadosBanco.saidas;
+            }
+
+            salvarDados(true);
+            migrarEHarmonizarProdutos();
+            atualizarResumoEstoque();
+            atualizarSelectsCadastro();
+            carregarListasComuns('entrada');
+            carregarListasComuns('saida');
+            renderizarListaEntradaEmbutida();
+            renderizarListaSaidaEmbutida();
+            atualizarStatusNuvem('conectado', `${(cadastros.entrada || []).length} entradas`);
+        } else {
+            // Se o banco ainda estiver vazio, inicializa com o estado atual da aplicação
+            atualizarStatusNuvem('salvando', 'Sincronizando estado inicial...');
+            await sincronizarComBancoNuvem();
+            atualizarStatusNuvem('conectado', 'Banco inicializado');
+        }
+    } catch (e) {
+        console.error("Falha ao carregar banco:", e);
+        atualizarStatusNuvem('erro', 'Falha ao sincronizar');
+    }
+}
+
+window.sincronizarBancoManual = async function() {
+    atualizarStatusNuvem('salvando', 'Sincronizando manualmente...');
+    try {
+        if (!window.firebaseEstoque) {
+            alert('Banco de dados ainda inicializando. Aguarde alguns instantes.');
+            return;
+        }
+        await sincronizarComBancoNuvem();
+        alert('✅ Todos os dados do estoque foram sincronizados com o banco de dados na nuvem com sucesso!');
+    } catch (e) {
+        alert('Erro ao sincronizar com o banco: ' + (e?.message || e));
+    }
+};
+
+window.notificarConexaoFirebase = function(conectado) {
+    if (conectado) {
+        carregarBancoDeDadosFirebase();
+    } else {
+        atualizarStatusNuvem('offline');
+    }
+};
 
 function salvarUsuario() {
     const id = document.getElementById('idUsuario').value;

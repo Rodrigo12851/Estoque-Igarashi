@@ -1,0 +1,72 @@
+{
+  "entities": {
+    "cadastros": {
+      "title": "Cadastros Gerais",
+      "description": "Tabelas auxiliares e cadastros mestres de culturas, variedades, fazendas, pivôs, glebas, produtos, locais, controles e usuários",
+      "type": "object",
+      "properties": {
+        "cultura": { "type": "array", "description": "Lista de culturas cadastradas" },
+        "variedade": { "type": "array", "description": "Lista de variedades cadastradas" },
+        "produto": { "type": "array", "description": "Lista de produtos e classificações de calibre" },
+        "local": { "type": "array", "description": "Lista de locais de depósito e galpões" },
+        "fazenda": { "type": "array", "description": "Lista de fazendas cadastradas" },
+        "gleba": { "type": "array", "description": "Lista de glebas cadastradas" },
+        "pivo": { "type": "array", "description": "Lista de pivôs cadastrados" },
+        "controle": { "type": "array", "description": "Lista de controles e lotes de safra" },
+        "usuario": { "type": "array", "description": "Lista de usuários e permissões" }
+      }
+    },
+    "entrada": {
+      "title": "Entrada de Estoque",
+      "description": "Lançamento de colheita/entrada de estoque",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "ID numérico do registro" },
+        "data": { "type": "string", "description": "Data no formato AAAA-MM-DD" },
+        "controleId": { "type": "number", "description": "ID do lote/controle" },
+        "glebaId": { "type": "number", "description": "ID da gleba" },
+        "variedadeId": { "type": "number", "description": "ID da variedade" },
+        "produtoId": { "type": "number", "description": "ID do produto" },
+        "localId": { "type": "number", "description": "ID do galpão/local" },
+        "embalagem": { "type": "string", "description": "Tipo de embalagem" },
+        "qtd": { "type": "number", "description": "Quantidade lançada" },
+        "observacao": { "type": "string", "description": "Observação" },
+        "criadoEm": { "type": "string", "description": "Timestamp de gravação" }
+      },
+      "required": ["id", "data", "controleId", "produtoId", "localId", "embalagem", "qtd"]
+    },
+    "saida": {
+      "title": "Saída de Estoque",
+      "description": "Lançamento de saída/expedição de estoque",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "ID numérico do registro" },
+        "data": { "type": "string", "description": "Data no formato AAAA-MM-DD" },
+        "controleId": { "type": "number", "description": "ID do lote/controle" },
+        "glebaId": { "type": "number", "description": "ID da gleba" },
+        "variedadeId": { "type": "number", "description": "ID da variedade" },
+        "produtoId": { "type": "number", "description": "ID do produto" },
+        "localId": { "type": "number", "description": "ID do galpão/local" },
+        "embalagem": { "type": "string", "description": "Tipo de embalagem" },
+        "qtd": { "type": "number", "description": "Quantidade de saída" },
+        "observacao": { "type": "string", "description": "Observação" },
+        "criadoEm": { "type": "string", "description": "Timestamp de gravação" }
+      },
+      "required": ["id", "data", "controleId", "produtoId", "localId", "embalagem", "qtd"]
+    }
+  },
+  "firestore": {
+    "/cadastros/{cadastroId}": {
+      "schema": "cadastros",
+      "description": "Tabelas de cadastro do estoque"
+    },
+    "/entradas/{entradaId}": {
+      "schema": "entrada",
+      "description": "Lançamentos de entrada de produtos"
+    },
+    "/saidas/{saidaId}": {
+      "schema": "saida",
+      "description": "Lançamentos de saída e expedição"
+    }
+  }
+}
