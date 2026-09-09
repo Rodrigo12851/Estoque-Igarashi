@@ -984,6 +984,7 @@ const SVG_EDITAR = `<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.9
 const SVG_EXCLUIR = `<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>`;
 
 document.addEventListener("DOMContentLoaded", function() {
+    migrarEHarmonizarProdutos();
     salvarDados();
     atualizarResumoEstoque();
     atualizarTipoInputValor();
@@ -1021,9 +1022,160 @@ function dataHoje() {
     return `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
 }
 
+// Extrai código numérico/alfanumérico e nome real de um produto (ex: "12554- BAIXO PADRAO" -> cod: "12554", nome: "BAIXO PADRAO")
+function extrairCodigoENomeProduto(texto, codigoExistente) {
+    let str = String(texto || '').trim();
+    let cod = String(codigoExistente || '').trim();
+    let nome = str;
+
+    const codEhDummy = !cod || /^PRD-\w{3}$/i.test(cod);
+
+    // Formato com separador: "12554 - BAIXO PADRAO", "12554- BAIXO PADRAO", "12531: CALIBRE I"
+    const matchComSeparador = str.match(/^([A-Za-z0-9\.\/_]{2,})\s*[-–—:]\s*(.+)$/);
+    if (matchComSeparador) {
+        const possivelCod = matchComSeparador[1].trim();
+        const possivelNome = matchComSeparador[2].trim();
+        if (codEhDummy || !cod) {
+            cod = possivelCod;
+        }
+        nome = possivelNome;
+    } else {
+        // Formato sem separador: "12554 BAIXO PADRAO" (código numérico com 3+ dígitos seguido de espaço)
+        const matchSemSeparador = str.match(/^(\d{3,})\s+([A-Za-z].+)$/);
+        if (matchSemSeparador) {
+            const possivelCod = matchSemSeparador[1].trim();
+            const possivelNome = matchSemSeparador[2].trim();
+            if (codEhDummy || !cod) {
+                cod = possivelCod;
+            }
+            nome = possivelNome;
+        }
+    }
+
+    if ((!cod || codEhDummy) && /^\d+$/.test(str)) {
+        cod = str;
+    }
+
+    return { cod: cod || '', nome: nome || str };
+}
+
 function limparNomeProduto(nome) {
     if (!nome) return '-';
-    return nome.replace(/crt/gi, '').replace(/rt/gi, '').replace(/cenoura/gi, '').replace(/cebola/gi, '').replace(/consumo/gi, '').replace(/\s+/g, ' ').trim() || nome; 
+    let limpo = String(nome).trim();
+    // Remove qualquer código inicial embutido se ainda existir (ex: "12554- BAIXO PADRAO" -> "BAIXO PADRAO")
+    limpo = limpo.replace(/^[A-Za-z0-9\.\/_]{2,}\s*[-–—:]\s*/, '');
+    limpo = limpo.replace(/^\d{3,}\s+/, '');
+    limpo = limpo.replace(/\b(crt|rt|cenoura|cebola|consumo)\b/gi, '').replace(/\s+/g, ' ').trim();
+    return limpo || nome; 
+}
+
+// Migra automaticamente produtos já existentes no localStorage que receberam código dummy "PRD-125", etc.
+function migrarEHarmonizarProdutos() {
+    if (!cadastros || !cadastros.produto || cadastros.produto.length === 0) return;
+
+    let alterou = false;
+    let mapaDeParaId = {};
+
+    // 1. Corrige códigos que ficaram como 'PRD-125' ou 'PRD-...' recuperando o código real do produto
+    cadastros.produto.forEach(p => {
+        let codAtual = String(p.cod || p.codigo || '').trim();
+        let nomeAtual = String(p.nome || '').trim();
+        
+        let extraido = extrairCodigoENomeProduto(nomeAtual, codAtual);
+        if ((!codAtual || /^PRD-\w{3}$/i.test(codAtual)) && extraido.cod && !/^PRD-\w{3}$/i.test(extraido.cod)) {
+            p.cod = extraido.cod;
+            p.codigo = extraido.cod;
+            alterou = true;
+        } else if (!p.cod && p.codigo) {
+            p.cod = p.codigo;
+            alterou = true;
+        }
+        
+        let nomeLimpo = limparNomeProduto(extraido.nome || nomeAtual);
+        if (nomeLimpo && nomeLimpo !== p.nome) {
+            p.nome = nomeLimpo;
+            alterou = true;
+        }
+    });
+
+    // 2. Unifica duplicidades de produtos criados separadamente entre entrada e saída
+    let produtosUnicos = [];
+    let mapaCod = {};
+    let mapaNome = {};
+
+    cadastros.produto.forEach(p => {
+        let cultId = p.culturaId || 0;
+        let codNormalizado = p.cod ? normalizarTexto(p.cod) : '';
+        let nomeNormalizado = normalizarTexto(limparNomeProduto(p.nome));
+        
+        let chaveCod = (codNormalizado && !/^PRD-\w{3}$/i.test(p.cod)) ? `${cultId}_COD_${codNormalizado}` : null;
+        let chaveNome = nomeNormalizado ? `${cultId}_NOME_${nomeNormalizado}` : null;
+
+        let existente = (chaveCod && mapaCod[chaveCod]) || (chaveNome && mapaNome[chaveNome]);
+
+        if (existente && existente.id !== p.id) {
+            mapaDeParaId[p.id] = existente.id;
+            if ((!existente.cod || /^PRD-\w{3}$/i.test(existente.cod)) && p.cod && !/^PRD-\w{3}$/i.test(p.cod)) {
+                existente.cod = p.cod;
+                existente.codigo = p.cod;
+            }
+            alterou = true;
+        } else {
+            produtosUnicos.push(p);
+            if (chaveCod) mapaCod[chaveCod] = p;
+            if (chaveNome) mapaNome[chaveNome] = p;
+        }
+    });
+
+    if (Object.keys(mapaDeParaId).length > 0) {
+        cadastros.produto = produtosUnicos;
+
+        (cadastros.entrada || []).forEach(e => {
+            if (mapaDeParaId[e.produtoId]) {
+                e.produtoId = mapaDeParaId[e.produtoId];
+                alterou = true;
+            }
+        });
+
+        (cadastros.saida || []).forEach(s => {
+            if (mapaDeParaId[s.produtoId]) {
+                s.produtoId = mapaDeParaId[s.produtoId];
+                alterou = true;
+            }
+        });
+    }
+
+    // 3. Harmoniza glebaId e variedadeId das saídas para que dêem baixa correta nas entradas do mesmo lote/controle
+    if (cadastros.saida && cadastros.saida.length > 0 && cadastros.entrada && cadastros.entrada.length > 0) {
+        cadastros.saida.forEach(s => {
+            let entMesmoControle = cadastros.entrada.find(e => e.controleId === s.controleId && e.produtoId === s.produtoId) 
+                               || cadastros.entrada.find(e => e.controleId === s.controleId);
+            if (entMesmoControle) {
+                let glebaAtual = cadastros.gleba.find(g => g.id === s.glebaId);
+                let nomeGlebaAtual = glebaAtual ? normalizarTexto(glebaAtual.nome) : '';
+                if (!s.glebaId || nomeGlebaAtual === '1' || nomeGlebaAtual === 'gleba 1' || nomeGlebaAtual === '') {
+                    s.glebaId = entMesmoControle.glebaId;
+                    alterou = true;
+                }
+                
+                let varAtual = cadastros.variedade.find(v => v.id === s.variedadeId);
+                let nomeVarAtual = varAtual ? normalizarTexto(varAtual.nome) : '';
+                if (!s.variedadeId || nomeVarAtual === 'padrao' || nomeVarAtual === '') {
+                    s.variedadeId = entMesmoControle.variedadeId;
+                    alterou = true;
+                }
+
+                if (!s.localId && entMesmoControle.localId) {
+                    s.localId = entMesmoControle.localId;
+                    alterou = true;
+                }
+            }
+        });
+    }
+
+    if (alterou) {
+        salvarDados();
+    }
 }
 
 function limparNomeGalpao(nome) {
@@ -1072,20 +1224,46 @@ function mostrarPagina(nome) {
 function obterSaldosAtuais() {
     let saldos = {};
     cadastros.entrada.forEach(ent => {
-        let chave = `${ent.localId || 0}_${ent.produtoId || 0}_${ent.controleId}_${ent.glebaId || 0}_${ent.variedadeId || 0}`;
+        let chave = `${ent.localId || 0}_${ent.produtoId || 0}_${ent.controleId}`;
         if (!saldos[chave]) {
-            saldos[chave] = { localId: ent.localId, produtoId: ent.produtoId, controleId: ent.controleId, glebaId: ent.glebaId, variedadetId: ent.variedadeId, caixas: 0, contentores: 0, sacos: 0 };
+            saldos[chave] = { 
+                localId: ent.localId, 
+                produtoId: ent.produtoId, 
+                controleId: ent.controleId, 
+                glebaId: ent.glebaId, 
+                variedadeId: ent.variedadeId,
+                glebasSet: new Set(),
+                variedadesSet: new Set(),
+                caixas: 0, 
+                contentores: 0, 
+                sacos: 0 
+            };
         }
+        if (ent.glebaId) saldos[chave].glebasSet.add(ent.glebaId);
+        if (ent.variedadeId) saldos[chave].variedadesSet.add(ent.variedadeId);
         if (ent.embalagem === 'Caixa') saldos[chave].caixas += parseInt(ent.qtd || 0);
         else if (ent.embalagem === 'Contentor') saldos[chave].contentores += parseInt(ent.qtd || 0);
         else if (ent.embalagem === 'Saco') saldos[chave].sacos += parseInt(ent.qtd || 0);
     });
     
     cadastros.saida.forEach(sai => {
-        let chave = `${sai.localId || 0}_${sai.produtoId || 0}_${sai.controleId}_${sai.glebaId || 0}_${sai.variedadeId || 0}`;
+        let chave = `${sai.localId || 0}_${sai.produtoId || 0}_${sai.controleId}`;
         if (!saldos[chave]) {
-            saldos[chave] = { localId: sai.localId, produtoId: sai.produtoId, controleId: sai.controleId, glebaId: sai.glebaId, variedadetId: sai.variedadeId, caixas: 0, contentores: 0, sacos: 0 };
+            saldos[chave] = { 
+                localId: sai.localId, 
+                produtoId: sai.produtoId, 
+                controleId: sai.controleId, 
+                glebaId: sai.glebaId, 
+                variedadeId: sai.variedadeId,
+                glebasSet: new Set(),
+                variedadesSet: new Set(),
+                caixas: 0, 
+                contentores: 0, 
+                sacos: 0 
+            };
         }
+        if (sai.glebaId) saldos[chave].glebasSet.add(sai.glebaId);
+        if (sai.variedadeId) saldos[chave].variedadesSet.add(sai.variedadeId);
         if (sai.embalagem === 'Caixa') saldos[chave].caixas -= parseInt(sai.qtd || 0);
         else if (sai.embalagem === 'Contentor') saldos[chave].contentores -= parseInt(sai.qtd || 0);
         else if (sai.embalagem === 'Saco') saldos[chave].sacos -= parseInt(sai.qtd || 0);
@@ -1239,15 +1417,21 @@ function carregarDadosBaseControle(tipo) {
             }
         });
         campoGleba.innerHTML = `<option value="">Selecione</option>` + cadastros.gleba.filter(g => glebasIdsVinculadas.includes(g.id) && glebasEstoque.has(g.id)).map(g => `<option value="${g.id}">${g.nome}</option>`).join('');
-        campoProd.innerHTML = `<option value="">Selecione o Produto</option>` + cadastros.produto.filter(p => produtosEstoque.has(p.id)).map(p => `<option value="${p.id}">${p.nome}</option>`).join('');
+        campoProd.innerHTML = `<option value="">Selecione o Produto</option>` + cadastros.produto.filter(p => produtosEstoque.has(p.id)).map(p => {
+            let codTxt = p.cod ? `${p.cod} - ` : '';
+            return `<option value="${p.id}">${codTxt}${limparNomeProduto(p.nome)}</option>`;
+        }).join('');
         campoVariedade.innerHTML = '<option value="">Selecione o produto primeiro</option>';
         campoLoc.innerHTML = '<option value="">Selecione o produto primeiro</option>';
         document.getElementById('embalagemSaida').innerHTML = '<option value="">Selecione o produto primeiro</option>';
     } else {
         campoGleba.innerHTML = glebasIdsVinculadas.length === 0 ? '<option value="">Nenhuma gleba vinculada</option>' : `<option value="">Selecione</option>` + cadastros.gleba.filter(g => glebasIdsVinculadas.includes(g.id)).map(g => `<option value="${g.id}">${g.nome}</option>`).join('');
         campoVariedade.innerHTML = `<option value="">Selecione</option>` + cadastros.variedade.filter(v => v.culturaId === c.culturaId).map(v => `<option value="${v.id}">${v.nome}</option>`).join('');
-        campoProd.innerHTML = `<option value="">Selecione</option>` + cadastros.produto.filter(p => p.culturaId === c.culturaId).map(p => `<option value="${p.id}">${p.nome}</option>`).join('');
-        campoLoc.innerHTML = `<option value="">Selecione</option>` + cadastros.local.filter(l => l.culturaId === c.culturaId).map(l => `<option value="${l.id}">${l.nome}</option>`).join('');
+        campoProd.innerHTML = `<option value="">Selecione</option>` + cadastros.produto.filter(p => p.culturaId === c.culturaId).map(p => {
+            let codTxt = p.cod ? `${p.cod} - ` : '';
+            return `<option value="${p.id}">${codTxt}${limparNomeProduto(p.nome)}</option>`;
+        }).join('');
+        campoLoc.innerHTML = `<option value="">Selecione</option>` + cadastros.local.filter(l => l.culturaId === c.culturaId).map(l => `<option value="${l.id}">${limparNomeGalpao(l.nome)}</option>`).join('');
     }
 }
 
@@ -1296,7 +1480,7 @@ function atualizarResumoEstoque() {
     const termoPesquisa = filtroEl ? filtroEl.value.toLowerCase().trim() : '';
 
     cadastros.entrada.forEach(ent => {
-        let chave = `${ent.localId || 0}_${ent.produtoId || 0}_${ent.controleId}_${ent.glebaId || 0}`;
+        let chave = `${ent.localId || 0}_${ent.produtoId || 0}_${ent.controleId}`;
         if (!saldos[chave]) {
             saldos[chave] = { 
                 localId: ent.localId, 
@@ -1318,7 +1502,7 @@ function atualizarResumoEstoque() {
     });
     
     cadastros.saida.forEach(sai => {
-        let chave = `${sai.localId || 0}_${sai.produtoId || 0}_${sai.controleId}_${sai.glebaId || 0}`;
+        let chave = `${sai.localId || 0}_${sai.produtoId || 0}_${sai.controleId}`;
         if (!saldos[chave]) {
             saldos[chave] = { 
                 localId: sai.localId, 
@@ -1383,26 +1567,47 @@ function atualizarResumoEstoque() {
             }
             let localNome = limparNomeGalpao(cadastros.local.find(x => x.id === item.localId)?.nome || '-'); 
             let produtoNomeLimpo = limparNomeProduto(prodObj?.nome || '-');
-            let txtVariedade = Array.from(item.variedadesSet).map(id => cadastros.variedade.find(v => v.id === id)?.nome).filter(Boolean).join(', ') || '-';
+
+            let listaVars = Array.from(item.variedadesSet).map(id => cadastros.variedade.find(v => v.id === id)?.nome).filter(Boolean);
+            let varsReais = listaVars.filter(n => normalizarTexto(n) !== 'padrao');
+            let txtVariedade = (varsReais.length > 0 ? varsReais : listaVars).join(', ') || '-';
+
             let fazendaNome = cadastros.fazenda.find(x => x.id === ctrlObj?.fazendaId)?.nome || '-';
             let pivoNome = limparNomePivo(cadastros.pivo.find(x => x.id === ctrlObj?.pivoId)?.nome || '');
             
-            // Exibir estritamente a gleba informada na movimentacao
-            let txtGleba = '';
-            if (item.glebaId) {
+            // Exibir a gleba real associada ao lote / movimentação
+            let listaGlebas = Array.from(item.glebasSet).map(id => cadastros.gleba.find(g => g.id === id)?.nome).filter(Boolean);
+            if (listaGlebas.length === 0 && item.glebaId) {
                 let gObj = cadastros.gleba.find(g => g.id === item.glebaId);
-                if (gObj) txtGleba = gObj.nome;
-            } else if (item.glebasSet && item.glebasSet.size > 0) {
-                txtGleba = Array.from(item.glebasSet).map(id => cadastros.gleba.find(g => g.id === id)?.nome).filter(Boolean).join(', ');
+                if (gObj) listaGlebas.push(gObj.nome);
             }
-            txtGleba = txtGleba.replace(/gleba/gi, '').replace(/\s+/g, ' ').trim() || '-';
+            if (listaGlebas.length === 0 && ctrlObj?.glebasIds && ctrlObj.glebasIds.length > 0) {
+                ctrlObj.glebasIds.forEach(gid => {
+                    let gObj = cadastros.gleba.find(g => g.id === gid);
+                    if (gObj) listaGlebas.push(gObj.nome);
+                });
+            }
+            let glebasReais = listaGlebas.filter(n => !/^(1|gleba\s*1)$/i.test(normalizarTexto(n)));
+            let txtGleba = (glebasReais.length > 0 ? glebasReais : listaGlebas)
+                .map(g => g.replace(/gleba/gi, '').replace(/\s+/g, ' ').trim())
+                .filter(Boolean)
+                .join(', ') || '-';
             let localidadeCombinada = pivoNome ? `${fazendaNome} ${pivoNome} / ${txtGleba}` : `${fazendaNome} / ${txtGleba}`;
 
             let identificacaoControle = ctrlObj?.identificacao ? ctrlObj.identificacao.trim() : '';
 
-            if (termoPesquisa && ![prodObj?.cod || '', localNome, produtoNomeLimpo, localidadeCombinada, txtVariedade, controleCodigo, identificacaoControle].some(v => v.toLowerCase().includes(termoPesquisa))) return;
+            let codExibicao = prodObj?.cod || '';
+            if (!codExibicao || /^PRD-\w{3}$/i.test(codExibicao)) {
+                let extraido = extrairCodigoENomeProduto(prodObj?.nome, codExibicao);
+                if (extraido.cod && !/^PRD-\w{3}$/i.test(extraido.cod)) {
+                    codExibicao = extraido.cod;
+                }
+            }
+            if (!codExibicao) codExibicao = '-';
 
-            listaItensFiltrados.push({ item, cod: prodObj?.cod || '-', localNome, produtoNomeLimpo, localidadeCombinada, txtVariedade, controleCodigo, identificacaoControle });
+            if (termoPesquisa && ![codExibicao, localNome, produtoNomeLimpo, localidadeCombinada, txtVariedade, controleCodigo, identificacaoControle].some(v => v.toLowerCase().includes(termoPesquisa))) return;
+
+            listaItensFiltrados.push({ item, cod: codExibicao, localNome, produtoNomeLimpo, localidadeCombinada, txtVariedade, controleCodigo, identificacaoControle });
             if (item.caixas !== 0) temAlgumaCaixa = true;
             if (item.contentores !== 0) temAlgumContentor = true;
             if (item.sacos !== 0) temAlgumSaco = true;
@@ -1621,9 +1826,12 @@ function renderizarListaEntradaEmbutida() {
     copia.forEach(l => {
         let dataBR = l.data ? l.data.split('-').reverse().join('/') : '-';
         let ctrlCod = cadastros.controle.find(c => c.id === l.controleId)?.cod || '-';
-        let prodNome = limparNomeProduto(cadastros.produto.find(p => p.id === l.produtoId)?.nome || '-');
+        let prodObj = cadastros.produto.find(p => p.id === l.produtoId);
+        let prodCod = prodObj?.cod || '';
+        let prodNome = limparNomeProduto(prodObj?.nome || '-');
+        let prodExibir = prodCod ? `${prodCod} - ${prodNome}` : prodNome;
         let locNome = limparNomeGalpao(cadastros.local.find(x => x.id === l.localId)?.nome || '-');
-        html += `<tr><td>${dataBR}</td><td><strong>${ctrlCod}</strong></td><td><strong>${prodNome}</strong></td><td>${locNome}</td><td style="font-weight: bold; color: #1b5e20;">${l.qtd} (${l.embalagem})</td><td class="acoes"><button class="btn-acao" onclick="editarEntrada(${l.id})" title="Editar">${SVG_EDITAR}</button><button class="btn-acao" onclick="excluirEntrada(${l.id})" title="Excluir">${SVG_EXCLUIR}</button></td></tr>`;
+        html += `<tr><td>${dataBR}</td><td><strong>${ctrlCod}</strong></td><td><strong>${prodExibir}</strong></td><td>${locNome}</td><td style="font-weight: bold; color: #1b5e20;">${l.qtd} (${l.embalagem})</td><td class="acoes"><button class="btn-acao" onclick="editarEntrada(${l.id})" title="Editar">${SVG_EDITAR}</button><button class="btn-acao" onclick="excluirEntrada(${l.id})" title="Excluir">${SVG_EXCLUIR}</button></td></tr>`;
     });
     html += '</tbody></table>';
     container.innerHTML = html;
@@ -1646,9 +1854,12 @@ function renderizarListaSaidaEmbutida() {
     copia.forEach(l => {
         let dataBR = l.data ? l.data.split('-').reverse().join('/') : '-';
         let ctrlCod = cadastros.controle.find(c => c.id === l.controleId)?.cod || '-';
-        let prodNome = limparNomeProduto(cadastros.produto.find(p => p.id === l.produtoId)?.nome || '-');
+        let prodObj = cadastros.produto.find(p => p.id === l.produtoId);
+        let prodCod = prodObj?.cod || '';
+        let prodNome = limparNomeProduto(prodObj?.nome || '-');
+        let prodExibir = prodCod ? `${prodCod} - ${prodNome}` : prodNome;
         let locNome = limparNomeGalpao(cadastros.local.find(x => x.id === l.localId)?.nome || '-');
-        html += `<tr><td>${dataBR}</td><td><strong>${ctrlCod}</strong></td><td><strong>${prodNome}</strong></td><td>${locNome}</td><td style="font-weight: bold; color: #b71c1c;">${l.qtd} (${l.embalagem})</td><td class="acoes"><button class="btn-acao" onclick="editarSaida(${l.id})" title="Editar">${SVG_EDITAR}</button><button class="btn-acao" onclick="excluirSaida(${l.id})" title="Excluir">${SVG_EXCLUIR}</button></td></tr>`;
+        html += `<tr><td>${dataBR}</td><td><strong>${ctrlCod}</strong></td><td><strong>${prodExibir}</strong></td><td>${locNome}</td><td style="font-weight: bold; color: #b71c1c;">${l.qtd} (${l.embalagem})</td><td class="acoes"><button class="btn-acao" onclick="editarSaida(${l.id})" title="Editar">${SVG_EDITAR}</button><button class="btn-acao" onclick="excluirSaida(${l.id})" title="Excluir">${SVG_EXCLUIR}</button></td></tr>`;
     });
     html += '</tbody></table>';
     container.innerHTML = html;
@@ -1710,7 +1921,7 @@ function salvarSaida() {
     if (!obj.controleId || !obj.glebaId || !obj.produtoId || !obj.localId || !obj.embalagem || !obj.qtd) return mostrarMsg('Preencha todos os campos', 'erro', 'msgSaida');
     
     let saldos = obterSaldosAtuais();
-    let apiKey = `${obj.localId}_${obj.produtoId}_${obj.controleId}_${obj.glebaId}_${obj.variedadeId}`;
+    let apiKey = `${obj.localId}_${obj.produtoId}_${obj.controleId}`;
     let saldoDisponivel = 0;
     if (saldos[apiKey]) {
         if (obj.embalagem === 'Caixa') saldoDisponivel = saldos[apiKey].caixas;
@@ -1720,7 +1931,7 @@ function salvarSaida() {
     
     if(id) {
         let registroAntigo = cadastros.saida.find(s => s.id === parseInt(id));
-        if(registroAntigo && registroAntigo.embalagem === obj.embalagem && registroAntigo.localId === obj.localId && registroAntigo.produtoId === obj.produtoId && registroAntigo.controleId === obj.controleId && registroAntigo.glebaId === obj.glebaId && registroAntigo.variedadeId === obj.variedadeId) {
+        if(registroAntigo && registroAntigo.embalagem === obj.embalagem && registroAntigo.localId === obj.localId && registroAntigo.produtoId === obj.produtoId && registroAntigo.controleId === obj.controleId) {
             saldoDisponivel += registroAntigo.qtd;
         }
     }
@@ -2743,7 +2954,11 @@ function processarAbaEntrada(workbook) {
         const pivo = String(mapa.pivo !== undefined ? r[mapa.pivo] : '').trim();
         const gleba = String(mapa.gleba !== undefined ? r[mapa.gleba] : '').trim();
         const variedade = String(mapa.variedade !== undefined ? r[mapa.variedade] : '').trim();
-        const produto = String(mapa.produto !== undefined ? r[mapa.produto] : '').trim();
+        const produtoRaw = String(mapa.produto !== undefined ? r[mapa.produto] : '').trim();
+        const codProdRaw = (mapa.codProduto !== undefined && r[mapa.codProduto]) ? String(r[mapa.codProduto]).trim() : ((mapa.codigo !== undefined && r[mapa.codigo]) ? String(r[mapa.codigo]).trim() : '');
+        const { cod: codExtraido, nome: nomeExtraido } = extrairCodigoENomeProduto(produtoRaw, codProdRaw);
+        const codigoProduto = codExtraido || codProdRaw;
+        const produto = nomeExtraido || produtoRaw;
         const local = String(mapa.local !== undefined ? r[mapa.local] : '').trim();
         let embalagem = String(mapa.embalagem !== undefined ? r[mapa.embalagem] : '').trim();
         const qtdRaw = mapa.qtd !== undefined ? r[mapa.qtd] : 0;
@@ -2784,6 +2999,7 @@ function processarAbaEntrada(workbook) {
             pivo: pivo || 'Geral',
             gleba: gleba || 'Gleba 1',
             variedade: variedade || 'Padrão',
+            codigoProduto: codigoProduto,
             produto: produto || 'Produto Geral',
             local: local || 'Galpão 01',
             embalagem,
@@ -2900,8 +3116,12 @@ function processarAbaSaida(workbook) {
     dados.forEach((r, idx) => {
         const data = formatarDataImportada(mapa.data !== undefined ? r[mapa.data] : '');
         const controle = String(mapa.controle !== undefined ? r[mapa.controle] : '').trim();
-        const variedade = String(mapa.variedade !== undefined ? r[mapa.variedade] : '').trim();
-        const produto = String(mapa.produto !== undefined ? r[mapa.produto] : '').trim();
+        let variedade = String(mapa.variedade !== undefined ? r[mapa.variedade] : '').trim();
+        const produtoRaw = String(mapa.produto !== undefined ? r[mapa.produto] : '').trim();
+        const codProdRaw = (mapa.codProduto !== undefined && r[mapa.codProduto]) ? String(r[mapa.codProduto]).trim() : ((mapa.codigo !== undefined && r[mapa.codigo]) ? String(r[mapa.codigo]).trim() : '');
+        const { cod: codExtraido, nome: nomeExtraido } = extrairCodigoENomeProduto(produtoRaw, codProdRaw);
+        const codigoProduto = codExtraido || codProdRaw;
+        const produto = nomeExtraido || produtoRaw;
         const local = String(mapa.local !== undefined ? r[mapa.local] : '').trim();
         let embalagem = String(mapa.embalagem !== undefined ? r[mapa.embalagem] : '').trim();
         const qtdRaw = mapa.qtd !== undefined ? r[mapa.qtd] : 0;
@@ -2912,11 +3132,38 @@ function processarAbaSaida(workbook) {
         else if (normEmb.includes('contentor') || normEmb.includes('bag') || normEmb.includes('big')) embalagem = 'Contentor';
         else embalagem = 'Saco';
 
-        const ctrlObj = cadastros.controle.find(c => normalizarTexto(c.nome) === normalizarTexto(controle));
-        const fazenda = ctrlObj ? ctrlObj.fazenda : (mapa.fazenda !== undefined ? String(r[mapa.fazenda]).trim() : '');
-        const cultura = ctrlObj ? ctrlObj.cultura : (mapa.cultura !== undefined ? String(r[mapa.cultura]).trim() : '');
-        const pivo = ctrlObj ? ctrlObj.pivo : '';
-        const gleba = (mapa.gleba !== undefined && r[mapa.gleba]) ? String(r[mapa.gleba]).trim() : (ctrlObj && ctrlObj.glebas ? ctrlObj.glebas[0] : '');
+        const ctrlObj = cadastros.controle.find(c => normalizarTexto(c.cod || c.nome) === normalizarTexto(controle));
+        let fazenda = (mapa.fazenda !== undefined && r[mapa.fazenda]) ? String(r[mapa.fazenda]).trim() : '';
+        let cultura = (mapa.cultura !== undefined && r[mapa.cultura]) ? String(r[mapa.cultura]).trim() : '';
+        let pivo = (mapa.pivo !== undefined && r[mapa.pivo]) ? String(r[mapa.pivo]).trim() : '';
+        let gleba = (mapa.gleba !== undefined && r[mapa.gleba]) ? String(r[mapa.gleba]).trim() : '';
+        if (!variedade && mapa.variedade !== undefined && r[mapa.variedade]) {
+            variedade = String(r[mapa.variedade]).trim();
+        }
+
+        if (ctrlObj) {
+            let fazObj = cadastros.fazenda.find(f => f.id === ctrlObj.fazendaId);
+            let cultObj = cadastros.cultura.find(c => c.id === ctrlObj.culturaId);
+            let pivObj = cadastros.pivo.find(p => p.id === ctrlObj.pivoId);
+            if (fazObj && !fazenda) fazenda = fazObj.nome;
+            if (cultObj && !cultura) cultura = cultObj.nome;
+            if (pivObj && !pivo) pivo = pivObj.nome;
+
+            let entCtrl = (cadastros.entrada || []).find(e => e.controleId === ctrlObj.id);
+            if (entCtrl) {
+                if (!gleba || /^(1|gleba\s*1)$/i.test(gleba)) {
+                    let gleObj = cadastros.gleba.find(g => g.id === entCtrl.glebaId);
+                    if (gleObj) gleba = gleObj.nome;
+                }
+                if (!variedade || /^(padrao|padrão)$/i.test(variedade)) {
+                    let varObj = cadastros.variedade.find(v => v.id === entCtrl.variedadeId);
+                    if (varObj) variedade = varObj.nome;
+                }
+            } else if (ctrlObj.glebasIds && ctrlObj.glebasIds.length > 0) {
+                let gleObj = cadastros.gleba.find(g => g.id === ctrlObj.glebasIds[0]);
+                if (gleObj && (!gleba || /^(1|gleba\s*1)$/i.test(gleba))) gleba = gleObj.nome;
+            }
+        }
 
         let valido = true;
         let motivoErro = '';
@@ -2938,6 +3185,7 @@ function processarAbaSaida(workbook) {
             pivo,
             gleba,
             variedade: variedade || 'Padrão',
+            codigoProduto: codigoProduto,
             produto: produto || 'Produto Geral',
             local: local || 'Galpão 01',
             embalagem,
@@ -3258,13 +3506,40 @@ function executarImportacaoFinal() {
         return item;
     }
 
-    function obterOuCriarProduto(culturaId, nome) {
+    function obterOuCriarProduto(culturaId, nome, codigoFornecido) {
         let n = (nome || 'Produto Comercial').trim();
-        let item = cadastros.produto.find(p => normalizarTexto(p.nome) === normalizarTexto(n));
+        let { cod: codExtraido, nome: nomeExtraido } = extrairCodigoENomeProduto(n, codigoFornecido);
+        let nomeLimpo = limparNomeProduto(nomeExtraido || n);
+        let codFinal = codExtraido || codigoFornecido || '';
+
+        // Procura primeiro por código
+        let item = null;
+        if (codFinal && !/^PRD-\w{3}$/i.test(codFinal)) {
+            item = cadastros.produto.find(p => String(p.cod || p.codigo || '').toLowerCase() === String(codFinal).toLowerCase());
+        }
+        // Se não encontrou por código, procura por nome limpo
         if (!item) {
-            let codigo = 'PRD-' + n.slice(0, 3).toUpperCase();
-            item = { id: Date.now() + Math.floor(Math.random() * 10000), culturaId: culturaId || (cadastros.cultura[0]?.id || 1), cod: codigo, codigo: codigo, nome: n };
+            item = cadastros.produto.find(p => normalizarTexto(limparNomeProduto(p.nome)) === normalizarTexto(nomeLimpo));
+        }
+
+        if (!item) {
+            let codigo = codFinal || ('PRD-' + (nomeLimpo.replace(/[^A-Za-z0-9]/g, '').slice(0, 5).toUpperCase() || 'GERAL'));
+            item = { 
+                id: Date.now() + Math.floor(Math.random() * 10000), 
+                culturaId: culturaId || (cadastros.cultura[0]?.id || 1), 
+                cod: codigo, 
+                codigo: codigo, 
+                nome: nomeLimpo 
+            };
             cadastros.produto.push(item);
+        } else {
+            if ((!item.cod || /^PRD-\w{3}$/i.test(item.cod)) && codFinal && !/^PRD-\w{3}$/i.test(codFinal)) {
+                item.cod = codFinal;
+                item.codigo = codFinal;
+            }
+            if (nomeLimpo && item.nome !== nomeLimpo) {
+                item.nome = nomeLimpo;
+            }
         }
         return item;
     }
@@ -3310,7 +3585,7 @@ function executarImportacaoFinal() {
             const piv = obterOuCriarPivo(l.pivo);
             const gle = obterOuCriarGleba(l.gleba);
             const varItem = obterOuCriarVariedade(cult.id, l.variedade);
-            const prod = obterOuCriarProduto(cult.id, l.produto);
+            const prod = obterOuCriarProduto(cult.id, l.produto, l.codigoProduto);
             const loc = obterOuCriarLocal(cult.id, l.local);
             const ctrl = obterOuCriarControle(l.controle, faz.id, cult.id, piv.id, gle.id);
 
@@ -3342,18 +3617,32 @@ function executarImportacaoFinal() {
             const cult = obterOuCriarCultura(l.cultura);
             const faz = obterOuCriarFazenda(l.fazenda);
             const piv = obterOuCriarPivo(l.pivo);
-            const gle = obterOuCriarGleba(l.gleba);
-            const varItem = obterOuCriarVariedade(cult.id, l.variedade);
-            const prod = obterOuCriarProduto(cult.id, l.produto);
+            let gle = obterOuCriarGleba(l.gleba);
+            let varItem = obterOuCriarVariedade(cult.id, l.variedade);
+            const prod = obterOuCriarProduto(cult.id, l.produto, l.codigoProduto);
             const loc = obterOuCriarLocal(cult.id, l.local);
             const ctrl = obterOuCriarControle(l.controle, faz.id, cult.id, piv.id, gle.id);
+
+            let finalGlebaId = gle.id;
+            let finalVariedadeId = varItem.id;
+            let entCtrl = (cadastros.entrada || []).find(e => e.controleId === ctrl.id);
+            if (entCtrl) {
+                let nomeGleba = normalizarTexto(gle.nome);
+                if (nomeGleba === '1' || nomeGleba === 'gleba 1' || nomeGleba === '') {
+                    finalGlebaId = entCtrl.glebaId;
+                }
+                let nomeVar = normalizarTexto(varItem.nome);
+                if (nomeVar === 'padrao' || nomeVar === '') {
+                    finalVariedadeId = entCtrl.variedadeId;
+                }
+            }
 
             cadastros.saida.push({
                 id: Date.now() + Math.floor(Math.random() * 100000),
                 data: l.data || dataHoje(),
                 controleId: ctrl.id,
-                glebaId: gle.id,
-                variedadeId: varItem.id,
+                glebaId: finalGlebaId,
+                variedadeId: finalVariedadeId,
                 produtoId: prod.id,
                 localId: loc.id,
                 embalagem: l.embalagem || 'Saco',
@@ -3420,17 +3709,25 @@ function executarImportacaoFinal() {
         (cats.produto || []).forEach(novo => {
             const cult = cadastros.cultura.find(c => normalizarTexto(c.nome) === normalizarTexto(novo.cultura)) || cadastros.cultura[0];
             const cultId = cult ? cult.id : 1;
-            const existe = cadastros.produto.some(p => normalizarTexto(p.nome) === normalizarTexto(novo.nome));
+            const extraido = extrairCodigoENomeProduto(novo.nome, novo.codigo || novo.cod);
+            const nomeFinal = limparNomeProduto(extraido.nome || novo.nome);
+            const codFinal = extraido.cod || novo.codigo || novo.cod || '';
+            const existe = cadastros.produto.find(p => (codFinal && !/^PRD-\w{3}$/i.test(codFinal) && String(p.cod).toLowerCase() === codFinal.toLowerCase()) || (normalizarTexto(limparNomeProduto(p.nome)) === normalizarTexto(nomeFinal)));
             if (!existe) {
-                const cod = novo.codigo || novo.cod || 'PRD-' + novo.nome.slice(0, 3).toUpperCase();
+                const cod = codFinal || ('PRD-' + (nomeFinal.replace(/[^A-Za-z0-9]/g, '').slice(0, 5).toUpperCase() || 'GERAL'));
                 cadastros.produto.push({
                     id: Date.now() + Math.floor(Math.random() * 10000),
                     culturaId: cultId,
                     cod: cod,
                     codigo: cod,
-                    nome: novo.nome
+                    nome: nomeFinal
                 });
                 totalInseridos++;
+            } else {
+                if ((!existe.cod || /^PRD-\w{3}$/i.test(existe.cod)) && codFinal && !/^PRD-\w{3}$/i.test(codFinal)) {
+                    existe.cod = codFinal;
+                    existe.codigo = codFinal;
+                }
             }
         });
 
