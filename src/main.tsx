@@ -21,6 +21,11 @@ testarConexao().then(conectado => {
       (window as any).notificarConexaoFirebase(false);
     }
   }
+}).catch(err => {
+  console.warn("Firebase Firestore aviso de inicialização:", err);
+  if (typeof (window as any).notificarConexaoFirebase === 'function') {
+    (window as any).notificarConexaoFirebase(false);
+  }
 });
 
 const rootEl = document.getElementById('root');

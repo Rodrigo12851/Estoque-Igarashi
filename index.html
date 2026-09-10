@@ -4,12 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
     <title>Controle de Estoque Agrícola Inteligente</title>
-    <meta name="description" content="Controle de estoque agrícola inteligente com assistente IA, controle de safras, entradas, saídas, cadastros, relatórios e importação de planilhas Excel." />
+    <meta name="description" content="Controle de estoque agrícola inteligente com banco de dados em nuvem Firebase Firestore, controle de safras, entradas, saídas, cadastros, relatórios e importação de planilhas Excel." />
     <meta property="og:title" content="Controle de Estoque Agrícola Inteligente" />
-    <meta property="og:description" content="Controle de estoque agrícola inteligente com assistente IA, controle de safras, entradas, saídas, cadastros, relatórios e importação de planilhas Excel." />
+    <meta property="og:description" content="Controle de estoque agrícola inteligente com banco de dados em nuvem Firebase Firestore, controle de safras, entradas, saídas, cadastros, relatórios e importação de planilhas Excel." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         * {margin: 0; padding: 0; box-sizing: border-box; font-family: Arial, sans-serif;}
         body {background: #f8faf6; padding: 6px; font-size: 13px;}
@@ -944,20 +943,32 @@
 <script type="module" src="/src/main.tsx"></script>
 
 <script>
-// --- INICIALIZAÇÃO DE DADOS (LOCALSTORAGE) ---
-let localCadastros = JSON.parse(localStorage.getItem('cadastros')) || {};
+// --- INICIALIZAÇÃO DE DADOS (LOCALSTORAGE COM PROTEÇÃO CONTRA FALHAS) ---
+function safeJsonParse(key, fallback) {
+    try {
+        const item = localStorage.getItem(key);
+        if (!item || !item.trim()) return fallback;
+        const parsed = JSON.parse(item);
+        return (parsed !== null && parsed !== undefined) ? parsed : fallback;
+    } catch (e) {
+        console.warn(`Aviso: erro ao carregar "${key}" do localStorage:`, e);
+        return fallback;
+    }
+}
+
+let localCadastros = safeJsonParse('cadastros', {});
 let cadastros = {
-    cultura: localCadastros.cultura || [],
-    variedade: localCadastros.variedade || [],
-    produto: localCadastros.produto || [],
-    local: localCadastros.local || [],
-    fazenda: localCadastros.fazenda || [],
-    gleba: localCadastros.gleba || [],
-    pivo: localCadastros.pivo || [],
-    controle: localCadastros.controle || [],
-    usuario: localCadastros.usuario || [], // Nova lista de usuários
-    entrada: JSON.parse(localStorage.getItem('entrada')) || [],
-    saida: JSON.parse(localStorage.getItem('saida')) || []
+    cultura: Array.isArray(localCadastros.cultura) ? localCadastros.cultura : [],
+    variedade: Array.isArray(localCadastros.variedade) ? localCadastros.variedade : [],
+    produto: Array.isArray(localCadastros.produto) ? localCadastros.produto : [],
+    local: Array.isArray(localCadastros.local) ? localCadastros.local : [],
+    fazenda: Array.isArray(localCadastros.fazenda) ? localCadastros.fazenda : [],
+    gleba: Array.isArray(localCadastros.gleba) ? localCadastros.gleba : [],
+    pivo: Array.isArray(localCadastros.pivo) ? localCadastros.pivo : [],
+    controle: Array.isArray(localCadastros.controle) ? localCadastros.controle : [],
+    usuario: Array.isArray(localCadastros.usuario) ? localCadastros.usuario : [],
+    entrada: safeJsonParse('entrada', []),
+    saida: safeJsonParse('saida', [])
 };
 
 // Usuário Logado e Permissões Administrativas
@@ -976,10 +987,9 @@ let usuarioLogado = {
 };
 
 try {
-    const salvoUsr = localStorage.getItem('usuarioLogado');
-    if (salvoUsr) {
-        const parsed = JSON.parse(salvoUsr);
-        usuarioLogado = { ...usuarioLogado, ...parsed, podeExcluir: true };
+    const salvoUsr = safeJsonParse('usuarioLogado', null);
+    if (salvoUsr && typeof salvoUsr === 'object') {
+        usuarioLogado = { ...usuarioLogado, ...salvoUsr, podeExcluir: true };
     }
 } catch(e) {}
 
@@ -2939,21 +2949,25 @@ async function sincronizarComBancoNuvem() {
 }
 
 function salvarDados(pularNuvem = false) {
-    localStorage.setItem('cadastros', JSON.stringify({ 
-        cultura: cadastros.cultura, 
-        variedade: cadastros.variedade, 
-        produto: cadastros.produto, 
-        local: cadastros.local, 
-        fazenda: cadastros.fazenda, 
-        gleba: cadastros.gleba, 
-        pivo: cadastros.pivo, 
-        controle: cadastros.controle,
-        usuario: cadastros.usuario
-    }));
-    localStorage.setItem('entrada', JSON.stringify(cadastros.entrada));
-    localStorage.setItem('saida', JSON.stringify(cadastros.saida));
-    if (typeof usuarioLogado !== 'undefined') {
-        localStorage.setItem('usuarioLogado', JSON.stringify(usuarioLogado));
+    try {
+        localStorage.setItem('cadastros', JSON.stringify({ 
+            cultura: cadastros.cultura, 
+            variedade: cadastros.variedade, 
+            produto: cadastros.produto, 
+            local: cadastros.local, 
+            fazenda: cadastros.fazenda, 
+            gleba: cadastros.gleba, 
+            pivo: cadastros.pivo, 
+            controle: cadastros.controle,
+            usuario: cadastros.usuario
+        }));
+        localStorage.setItem('entrada', JSON.stringify(cadastros.entrada));
+        localStorage.setItem('saida', JSON.stringify(cadastros.saida));
+        if (typeof usuarioLogado !== 'undefined') {
+            localStorage.setItem('usuarioLogado', JSON.stringify(usuarioLogado));
+        }
+    } catch (e) {
+        console.warn('Aviso: falha ao gravar no localStorage:', e);
     }
 
     if (!pularNuvem && window.firebaseEstoque) {
